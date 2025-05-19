@@ -140,19 +140,22 @@ class RCMETRICS_OT_ImportRC(bpy.types.Operator):
         for node in nodes:
             nodes.remove(node)
             
-        # Create basic PBR setup
+        # Create Emission shader setup
         output_node = nodes.new(type='ShaderNodeOutputMaterial')
-        bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
+        emission_node = nodes.new(type='ShaderNodeEmission')
         tex_node = nodes.new(type='ShaderNodeTexImage')
         
         # Position nodes
         output_node.location = (300, 0)
-        bsdf_node.location = (0, 0)
+        emission_node.location = (0, 0)
         tex_node.location = (-300, 0)
         
         # Connect nodes
-        links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
-        links.new(tex_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+        links.new(emission_node.outputs['Emission'], output_node.inputs['Surface'])
+        links.new(tex_node.outputs['Color'], emission_node.inputs['Color'])
+        
+        # Set emission strength
+        emission_node.inputs['Strength'].default_value = 1.0
         
         # Assign texture
         tex_node.image = tex_img

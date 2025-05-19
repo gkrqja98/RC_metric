@@ -25,6 +25,14 @@ def update_active_camera(self, context):
             context.scene.camera = camera
     return None
 
+def get_diff_view_modes(self, context):
+    """Get modes for difference view"""
+    return [
+        ('HEATMAP', 'Heatmap', 'Display difference as a heatmap'),
+        ('GRAYSCALE', 'Grayscale', 'Display difference in grayscale'),
+        ('COLORIZED', 'Colorized', 'Display difference with color enhancement')
+    ]
+
 class RCMetricsProperties(PropertyGroup):
     """Property group for RC Metrics add-on"""
     rc_folder: StringProperty(
@@ -57,6 +65,26 @@ class RCMetricsProperties(PropertyGroup):
         min=0.0,
         max=1.0,
         precision=4
+    )
+    
+    # Difference image view options
+    diff_view_mode: EnumProperty(
+        name="Difference View Mode",
+        description="How to display the difference image",
+        items=[
+            ('HEATMAP', 'Heatmap', 'Display difference as a heatmap'),
+            ('GRAYSCALE', 'Grayscale', 'Display difference in grayscale'),
+            ('COLORIZED', 'Colorized', 'Display difference with color enhancement')
+        ],
+        default='COLORIZED'
+    )
+    
+    diff_multiplier: FloatProperty(
+        name="Difference Multiplier",
+        description="Multiply the difference values to make subtle differences more visible",
+        default=5.0,
+        min=1.0,
+        max=20.0
     )
 
 # Registration function

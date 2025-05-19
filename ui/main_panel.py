@@ -67,6 +67,20 @@ class RCMETRICS_PT_Panel(Panel):
             col.label(text=f"PSNR: {rc_metrics.last_psnr:.2f} dB")
             col.label(text=f"SSIM: {rc_metrics.last_ssim:.4f}")
             
+            # Add buttons to view rendered and difference images
+            box = layout.box()
+            box.label(text="View Results:", icon='IMAGE_DATA')
+            
+            row = box.row()
+            row.operator("rcmetrics.view_render", text="View Render", icon='RENDER_RESULT')
+            row.operator("rcmetrics.view_diff", text="View Difference", icon='DRIVER_DISTANCE')
+            
+            # Difference visualization options
+            diff_box = layout.box()
+            diff_box.label(text="Difference Visualization Options:", icon='OPTIONS')
+            diff_box.prop(rc_metrics, "diff_view_mode")
+            diff_box.prop(rc_metrics, "diff_multiplier", slider=True)
+            
             # Add guidance on interpreting results
             info_box = layout.box()
             info_box.label(text="Metrics Interpretation:", icon='QUESTION')

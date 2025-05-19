@@ -18,12 +18,63 @@ class RCMETRICS_PT_Panel(Panel):
         scene = context.scene
         rc_metrics = scene.rc_metrics
         
+        # Import section
         layout.label(text="RealityCapture Import")
         
         box = layout.box()
         box.label(text="Import and Setup")
         box.prop(rc_metrics, "rc_folder")
         box.operator("rcmetrics.import_rc")
+        
+        # Camera rendering and comparison section
+        layout.separator()
+        layout.label(text="Camera Rendering & Metrics")
+        
+        box = layout.box()
+        
+        # Camera selector dropdown
+        box.prop(rc_metrics, "selected_camera")
+        
+        # Check active camera and guide user
+        if not scene.camera:
+            box.label(text="No active camera selected!", icon='ERROR')
+            box.label(text="Select a camera from the dropdown above")
+        else:
+            # Show active camera name
+            box.label(text=f"Active Camera: {scene.camera.name}", icon='CAMERA_DATA')
+            # Show camera background image status
+            has_bg = False
+            if hasattr(scene.camera.data, 'background_images'):
+                for bg in scene.camera.data.background_images:
+                    if bg.image:
+                        has_bg = True
+                        break
+            
+            if has_bg:
+                box.label(text="Background image found", icon='IMAGE_DATA')
+            else:
+                box.label(text="No background image assigned", icon='ERROR')
+        
+        # Render and compare button
+        row = box.row()
+        row.operator("rcmetrics.render_compare", text="Compare with Original", icon='IMAGE_RGB')
+        row.label(text="(Press F12 first to render)", icon='INFO')
+        
+        # Display metrics if they exist
+        if rc_metrics.last_psnr > 0 or rc_metrics.last_ssim > 0:
+            metrics_box = layout.box()
+            metrics_box.label(text="Image Comparison Results:", icon='INFO')
+            col = metrics_box.column(align=True)
+            col.label(text=f"PSNR: {rc_metrics.last_psnr:.2f} dB")
+            col.label(text=f"SSIM: {rc_metrics.last_ssim:.4f}")
+            
+            # Add guidance on interpreting results
+            info_box = layout.box()
+            info_box.label(text="Metrics Interpretation:", icon='QUESTION')
+            col = info_box.column(align=True)
+            col.label(text="PSNR > 30dB: Good quality")
+            col.label(text="SSIM > 0.9: High similarity")
+            col.label(text="SSIM > 0.95: Excellent match")
 
 # Registration
 def register():

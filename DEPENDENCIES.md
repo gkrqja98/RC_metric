@@ -4,6 +4,7 @@ This add-on requires the following Python packages to be installed in Blender's 
 
 - `numpy`
 - `opencv-python` (cv2)
+- `scikit-image` (for image quality metrics)
 
 ## Installation Steps
 
@@ -16,7 +17,7 @@ This add-on requires the following Python packages to be installed in Blender's 
 
 2. Open a terminal/command prompt and run:
    ```
-   "[Blender Python Path]" -m pip install numpy opencv-python
+   "[Blender Python Path]" -m pip install numpy opencv-python scikit-image
    ```
 
 ### Method 2: Using Blender's Console
@@ -27,7 +28,7 @@ This add-on requires the following Python packages to be installed in Blender's 
    ```python
    import sys
    import subprocess
-   subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy", "opencv-python"])
+   subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy", "opencv-python", "scikit-image"])
    ```
 
 ### Troubleshooting

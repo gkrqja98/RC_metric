@@ -16,7 +16,7 @@ bl_info = {
 }
 
 # Required packages
-required_packages = ["numpy", "opencv-python"]
+required_packages = ["numpy", "opencv-python", "scikit-image"]
 
 def check_dependencies():
     """Check if all required packages are installed"""
@@ -74,8 +74,9 @@ def register():
     properties.register()
     
     # Register operators
-    from .operators import import_operators
+    from .operators import import_operators, render_operators
     import_operators.register()
+    render_operators.register()
     
     # Register UI components
     from .ui import main_panel
@@ -98,7 +99,8 @@ def unregister():
     
     # Try to unregister operators
     try:
-        from .operators import import_operators
+        from .operators import import_operators, render_operators
+        render_operators.unregister()
         import_operators.unregister()
     except:
         pass

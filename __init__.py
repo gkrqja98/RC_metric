@@ -63,6 +63,34 @@ class RCMETRICS_PT_DependenciesPanel(bpy.types.Panel):
         else:
             layout.label(text="All dependencies installed", icon='CHECKMARK')
 
+# Module reload mechanism for development
+def reload_modules():
+    """Reload all addon modules - for development"""
+    # List all modules to reload
+    modules = [
+        "properties",
+        "operators",
+        "operators.import_operators",
+        "operators.camera_operators",
+        "operators.metrics_operators",
+        "operators.export_operators",
+        "utils",
+        "utils.camera_utils",
+        "utils.render_utils",
+        "utils.image_utils",
+        "utils.file_utils",
+        "ui",
+        "ui.main_panel",
+        "ui.camera_panel",
+        "ui.metrics_panel"
+    ]
+    
+    # Reload modules
+    for module_name in modules:
+        full_module_name = f"rc_metric.{module_name}"
+        if full_module_name in sys.modules:
+            importlib.reload(sys.modules[full_module_name])
+
 # Registration
 def register():
     try:
@@ -72,18 +100,35 @@ def register():
         import skimage.metrics
         
         # Reload modules if needed (for development)
-        if "rc_metrics" in sys.modules:
-            importlib.reload(sys.modules["rc_metrics"])
-        if "camera_utils" in sys.modules:
-            importlib.reload(sys.modules["camera_utils"])
-        if "render_utils" in sys.modules:
-            importlib.reload(sys.modules["render_utils"])
-        if "ui_components" in sys.modules:
-            importlib.reload(sys.modules["ui_components"])
+        reload_modules()
         
-        # Import and register the main module
-        from . import rc_metrics
-        rc_metrics.register()
+        # Register dependencies panel and operator (always registered)
+        bpy.utils.register_class(RCMETRICS_OT_InstallDependencies)
+        bpy.utils.register_class(RCMETRICS_PT_DependenciesPanel)
+        
+        # Register properties
+        from . import properties
+        properties.register()
+        
+        # Register operators
+        from .operators import import_operators
+        from .operators import camera_operators
+        from .operators import metrics_operators
+        from .operators import export_operators
+        
+        import_operators.register()
+        camera_operators.register()
+        metrics_operators.register()
+        export_operators.register()
+        
+        # Register UI components
+        from .ui import main_panel
+        from .ui import camera_panel
+        from .ui import metrics_panel
+        
+        main_panel.register()
+        camera_panel.register()
+        metrics_panel.register()
         
     except ImportError as e:
         # If missing dependencies, only register the dependencies panel
@@ -102,12 +147,39 @@ def unregister():
         except:
             pass
         
-        # Try to unregister main module
+        # Try to unregister UI components
         try:
-            from . import rc_metrics
-            rc_metrics.unregister()
+            from .ui import main_panel
+            from .ui import camera_panel
+            from .ui import metrics_panel
+            
+            metrics_panel.unregister()
+            camera_panel.unregister()
+            main_panel.unregister()
         except:
             pass
+        
+        # Try to unregister operators
+        try:
+            from .operators import import_operators
+            from .operators import camera_operators
+            from .operators import metrics_operators
+            from .operators import export_operators
+            
+            export_operators.unregister()
+            metrics_operators.unregister()
+            camera_operators.unregister()
+            import_operators.unregister()
+        except:
+            pass
+        
+        # Try to unregister properties
+        try:
+            from . import properties
+            properties.unregister()
+        except:
+            pass
+            
     except:
         pass
 

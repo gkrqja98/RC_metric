@@ -1,12 +1,18 @@
+"""
+Properties for the RC Metrics add-on.
+This module handles all property definitions.
+"""
+
 import bpy
-from bpy.props import BoolProperty, FloatProperty, StringProperty, PointerProperty, CollectionProperty
+from bpy.props import (StringProperty, BoolProperty, FloatProperty, 
+                      EnumProperty, IntProperty, CollectionProperty, PointerProperty)
 from bpy.types import PropertyGroup
 
-class CameraItemProperties(PropertyGroup):
-    """Properties for each camera item in the list"""
-    selected: BoolProperty(
-        name="Select",
-        description="Select this camera for metric calculation",
+class RCCamera(PropertyGroup):
+    """Camera item for the RC Metrics UI list"""
+    enabled: BoolProperty(
+        name="Enable",
+        description="Include this camera in metrics calculation",
         default=True
     )
     
@@ -30,15 +36,52 @@ class CameraItemProperties(PropertyGroup):
         precision=4
     )
     
-    camera: PointerProperty(
-        type=bpy.types.Object
-    )
-    
     has_results: BoolProperty(
         name="Has Results",
-        description="Whether this camera has metric results",
+        description="Whether this camera has calculated results",
         default=False
     )
+    
+    is_problematic: BoolProperty(
+        name="Is Problematic",
+        description="Whether this camera has values below threshold",
+        default=False
+    )
+
+class RCMETRICS_UL_CamerasList(bpy.types.UIList):
+    """UI List for RC Camera selection"""
+    
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(item, "enabled", text="")
+            
+            # Show camera name
+            split = row.split(factor=0.6)
+            split.label(text=item.name)
+            
+            # Show metrics if available
+            if item.has_results:
+                # Use colored text based on thresholds
+                if item.is_problematic:
+                    # Red for problematic values
+                    psnr_text = f"PSNR: {item.psnr:.2f}"
+                    ssim_text = f"SSIM: {item.ssim:.4f}"
+                    split.label(text=psnr_text, icon='ERROR')
+                    split.label(text=ssim_text, icon='ERROR')
+                else:
+                    # Green for good values
+                    psnr_text = f"PSNR: {item.psnr:.2f}"
+                    ssim_text = f"SSIM: {item.ssim:.4f}"
+                    split.label(text=psnr_text, icon='CHECKMARK')
+                    split.label(text=ssim_text, icon='CHECKMARK')
+            else:
+                split.label(text="Not calculated")
+                
+        elif self.layout_type in {'GRID'}:
+            layout.alignment = 'CENTER'
+            layout.prop(item, "enabled", text="")
+            layout.label(text=item.name)
 
 class RCMetricsProperties(PropertyGroup):
     """Property group for RC Metrics add-on"""
@@ -56,103 +99,70 @@ class RCMetricsProperties(PropertyGroup):
         subtype='DIR_PATH'
     )
     
+    # Camera list and selection
+    cameras: CollectionProperty(type=RCCamera)
+    active_camera_index: IntProperty(default=0)
+    
+    # Rendering options
     save_renders: BoolProperty(
-        name="Save Rendered Images",
+        name="Save Renders",
         description="Save rendered images to disk",
         default=True
     )
     
-    calculate_metrics_only: BoolProperty(
-        name="Calculate Metrics Only",
-        description="Calculate metrics without saving renders",
-        default=False
+    render_quality: EnumProperty(
+        name="Render Quality",
+        description="Quality settings for rendering",
+        items=[
+            ('preview', "Preview", "Fast, low-quality rendering (32 samples)"),
+            ('medium', "Medium", "Balanced rendering (64 samples)"),
+            ('high', "High", "High-quality rendering (128 samples)"),
+            ('final', "Final", "Production-quality rendering (256 samples)"),
+        ],
+        default='preview'
     )
     
+    # Threshold settings
     psnr_threshold: FloatProperty(
         name="PSNR Threshold",
-        description="Threshold for highlighting low PSNR values",
+        description="Minimum acceptable PSNR value",
         default=30.0,
         min=0.0,
-        max=100.0
+        soft_max=50.0
     )
     
     ssim_threshold: FloatProperty(
         name="SSIM Threshold",
-        description="Threshold for highlighting low SSIM values",
+        description="Minimum acceptable SSIM value",
         default=0.9,
         min=0.0,
-        max=1.0,
-        precision=3
+        max=1.0
     )
     
-    select_all_cameras: BoolProperty(
-        name="Select All",
-        description="Select all cameras",
-        default=True
-    )
+    # Calculation progress
+    is_calculating: BoolProperty(default=False)
+    calculation_progress: FloatProperty(default=0.0, min=0.0, max=100.0)
+    current_camera: StringProperty(default="")
     
-    # Collection of camera items
-    cameras: CollectionProperty(
-        type=CameraItemProperties
-    )
+    # Results
+    has_results: BoolProperty(default=False)
+    average_psnr: FloatProperty(default=0.0)
+    average_ssim: FloatProperty(default=0.0)
+
+# Registration function
+def register():
+    bpy.utils.register_class(RCCamera)
+    bpy.utils.register_class(RCMETRICS_UL_CamerasList)
+    bpy.utils.register_class(RCMetricsProperties)
     
-    # Index of the active camera item
-    active_camera_index: bpy.props.IntProperty()
+    # Register property group
+    bpy.types.Scene.rc_metrics = PointerProperty(type=RCMetricsProperties)
+
+# Unregistration function
+def unregister():
+    # Unregister property group
+    del bpy.types.Scene.rc_metrics
     
-    # Summary statistics
-    avg_psnr: FloatProperty(
-        name="Average PSNR",
-        default=0.0,
-        precision=2
-    )
-    
-    avg_ssim: FloatProperty(
-        name="Average SSIM",
-        default=0.0,
-        precision=4
-    )
-    
-    min_psnr: FloatProperty(
-        name="Min PSNR",
-        default=0.0,
-        precision=2
-    )
-    
-    min_ssim: FloatProperty(
-        name="Min SSIM",
-        default=0.0,
-        precision=4
-    )
-    
-    max_psnr: FloatProperty(
-        name="Max PSNR",
-        default=0.0,
-        precision=2
-    )
-    
-    max_ssim: FloatProperty(
-        name="Max SSIM",
-        default=0.0,
-        precision=4
-    )
-    
-    # Status
-    processing_camera: StringProperty(
-        name="Processing Camera",
-        default=""
-    )
-    
-    is_processing: BoolProperty(
-        name="Is Processing",
-        default=False
-    )
-    
-    # Register the classes
-    def register():
-        bpy.utils.register_class(CameraItemProperties)
-        bpy.utils.register_class(RCMetricsProperties)
-    
-    # Unregister the classes
-    def unregister():
-        bpy.utils.unregister_class(RCMetricsProperties)
-        bpy.utils.unregister_class(CameraItemProperties)
+    bpy.utils.unregister_class(RCMetricsProperties)
+    bpy.utils.unregister_class(RCMETRICS_UL_CamerasList)
+    bpy.utils.unregister_class(RCCamera)

@@ -1,0 +1,47 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Blender backup files
+*.blend1
+*.blend2
+*.blend3
+*.blend4
+*.blend5
+
+# RealityCapture data
+*/01_RealityCapture_Result/
+*RealityCapture_Result*/
+*.abc
+*.abc.rcInfo
+*_diffuse.png
+*.obj
+*.fbx
+*.mtl
+
+# Generated output
+metrics_output/
+renders/
+*.json
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE specific
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Environment
+venv/
+env/
+.env

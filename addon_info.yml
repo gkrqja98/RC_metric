@@ -1,14 +1,7 @@
-name: RealityCapture Metrics
+name: RealityCapture Import
 version: 1.0.0
+blender: 2.93
+description: Import RealityCapture results with proper setup
 author: Your Name
-blender: 2.93.0
-description: Import RealityCapture results and calculate metrics
-location: View3D > Sidebar > RC Metrics
-category: 3D View
-doc_url: https://github.com/yourusername/rc_metric
-tracker_url: https://github.com/yourusername/rc_metric/issues
-dependencies:
-  - numpy
-  - opencv-python
-  - scikit-image
+url: https://github.com/yourusername/rc_metric
 license: MIT

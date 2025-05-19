@@ -6,17 +6,17 @@ import os
 bl_info = {
     "name": "RealityCapture Metrics",
     "author": "Your Name",
-    "version": (1, 1),
+    "version": (1, 0),
     "blender": (2, 93, 0),
     "location": "View3D > Sidebar > RC Metrics",
-    "description": "Import RealityCapture results and calculate metrics",
+    "description": "Import RealityCapture results",
     "warning": "Requires additional Python packages",
     "doc_url": "https://github.com/yourusername/rc_metric",
     "category": "3D View",
 }
 
 # Required packages
-required_packages = ["numpy", "opencv-python", "scikit-image"]
+required_packages = ["numpy", "opencv-python"]
 
 def check_dependencies():
     """Check if all required packages are installed"""
@@ -63,103 +63,50 @@ class RCMETRICS_PT_DependenciesPanel(bpy.types.Panel):
         else:
             layout.label(text="All dependencies installed", icon='CHECKMARK')
 
-# Module reload mechanism for development
-def reload_modules():
-    """Reload all addon modules - for development"""
-    # List all modules to reload
-    modules = [
-        "properties",
-        "operators",
-        "operators.import_operators",
-        "operators.camera_operators",
-        "operators.metrics_operators",
-        "operators.export_operators",
-        "utils",
-        "utils.camera_utils",
-        "utils.render_utils",
-        "utils.image_utils",
-        "utils.file_utils",
-        "ui",
-        "ui.main_panel",
-        "ui.camera_panel",
-        "ui.metrics_panel"
-    ]
-    
-    # Reload modules
-    for module_name in modules:
-        full_module_name = f"rc_metric.{module_name}"
-        if full_module_name in sys.modules:
-            importlib.reload(sys.modules[full_module_name])
-
 # Registration
 def register():
-    try:
-        # Try to import the required modules
-        import numpy
-        import cv2
-        import skimage.metrics
-        
-        # Reload modules if needed (for development)
-        reload_modules()
-        
-        # Register dependencies panel and operator (always registered)
-        bpy.utils.register_class(RCMETRICS_OT_InstallDependencies)
-        bpy.utils.register_class(RCMETRICS_PT_DependenciesPanel)
-        
-        # Register properties
-        from . import properties
-        properties.register()
-        
-        # Register operators
-        from .operators import import_operators
-        
-        import_operators.register()
-        
-        # Register UI components
-        from .ui import main_panel
-        
-        main_panel.register()
-        
-    except ImportError as e:
-        # If missing dependencies, only register the dependencies panel
-        print(f"Error loading RC Metrics add-on: {e}")
-        print("Please install the required dependencies")
-        
-        bpy.utils.register_class(RCMETRICS_OT_InstallDependencies)
-        bpy.utils.register_class(RCMETRICS_PT_DependenciesPanel)
+    # Register dependencies panel and operator (always registered)
+    bpy.utils.register_class(RCMETRICS_OT_InstallDependencies)
+    bpy.utils.register_class(RCMETRICS_PT_DependenciesPanel)
+    
+    # Register properties
+    from . import properties
+    properties.register()
+    
+    # Register operators
+    from .operators import import_operators
+    import_operators.register()
+    
+    # Register UI components
+    from .ui import main_panel
+    main_panel.register()
 
 def unregister():
+    # Try to unregister dependencies panel
     try:
-        # Try to unregister dependencies panel
-        try:
-            bpy.utils.unregister_class(RCMETRICS_PT_DependenciesPanel)
-            bpy.utils.unregister_class(RCMETRICS_OT_InstallDependencies)
-        except:
-            pass
-        
-        # Try to unregister UI components
-        try:
-            from .ui import main_panel
-            
-            main_panel.unregister()
-        except:
-            pass
-        
-        # Try to unregister operators
-        try:
-            from .operators import import_operators
-            
-            import_operators.unregister()
-        except:
-            pass
-        
-        # Try to unregister properties
-        try:
-            from . import properties
-            properties.unregister()
-        except:
-            pass
-            
+        bpy.utils.unregister_class(RCMETRICS_PT_DependenciesPanel)
+        bpy.utils.unregister_class(RCMETRICS_OT_InstallDependencies)
+    except:
+        pass
+    
+    # Try to unregister UI components
+    try:
+        from .ui import main_panel
+        main_panel.unregister()
+    except:
+        pass
+    
+    # Try to unregister operators
+    try:
+        from .operators import import_operators
+        import_operators.unregister()
+    except:
+        pass
+    
+    # Try to unregister properties
+    try:
+        from . import properties
+        properties.unregister()
     except:
         pass
 

@@ -1,16 +1,14 @@
 """
 Import operators for RC Metrics Add-on.
-This module handles importing RealityCapture results.
 """
 
 import bpy
 import os
-from bpy.props import StringProperty
 
 class RCMETRICS_OT_ImportRC(bpy.types.Operator):
     """Import RealityCapture results and setup cameras"""
     bl_idname = "rcmetrics.import_rc"
-    bl_label = "1. Import RC & Setup"
+    bl_label = "Import RC & Setup"
     bl_options = {'REGISTER', 'UNDO'}
     
     def check_rc_folder_structure(self, folder_path):

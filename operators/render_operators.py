@@ -5,11 +5,12 @@ Render operators for RC Metrics Add-on.
 import bpy
 import os
 import numpy as np
+import tempfile
 
 class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
-    """Compare the current render slot with the original camera image"""
+    """Render the current camera view and compare with the original image"""
     bl_idname = "rcmetrics.render_compare"
-    bl_label = "Compare with Original"
+    bl_label = "Render and Compare"
     bl_options = {'REGISTER', 'UNDO'}
     
     def check_active_camera(self, context):
@@ -36,51 +37,63 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             
         return True, bg_image
     
-    def get_render_result(self, context):
-        """Get render result from Render Slot 1 (after F12 was pressed)"""
+    def render_current_view(self, context):
+        """Render the current view and return the render result"""
         try:
-            # Check for Render Result image
-            if 'Render Result' not in bpy.data.images:
-                self.report({'ERROR'}, "No Render Result found. Please render first by pressing F12.")
+            # Store original render settings
+            original_filepath = context.scene.render.filepath
+            original_format = context.scene.render.image_settings.file_format
+            
+            # Create a temporary file path for saving the render
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, "temp_render.png")
+            
+            # Set render to save to the temporary file
+            context.scene.render.filepath = temp_file
+            context.scene.render.image_settings.file_format = 'PNG'
+            
+            # Render the image and save to file
+            self.report({'INFO'}, f"Rendering to temporary file: {temp_file}")
+            bpy.ops.render.render(write_still=True)
+            
+            # Check if file was created
+            if not os.path.exists(temp_file):
+                self.report({'ERROR'}, f"Temporary render file was not created: {temp_file}")
+                return None
+            
+            # Load the saved image using OpenCV
+            import cv2
+            render_array = cv2.imread(temp_file)
+            if render_array is None:
+                self.report({'ERROR'}, f"Could not read temporary render file with OpenCV: {temp_file}")
                 return None
                 
-            render_result = bpy.data.images['Render Result']
+            # Convert from BGR to RGB
+            render_array = cv2.cvtColor(render_array, cv2.COLOR_BGR2RGB)
             
-            # Create a numpy array from the render result
-            width = render_result.size[0]
-            height = render_result.size[1]
+            self.report({'INFO'}, f"Successfully loaded render with shape {render_array.shape}")
             
-            # Ensure we have valid dimensions
-            if width <= 0 or height <= 0:
-                self.report({'ERROR'}, f"Invalid render dimensions: {width}x{height}")
-                return None
+            # Restore original render settings
+            context.scene.render.filepath = original_filepath
+            context.scene.render.image_settings.file_format = original_format
+            
+            # Try to remove temp file
+            try:
+                os.remove(temp_file)
+            except Exception as e:
+                self.report({'WARNING'}, f"Could not remove temporary file: {str(e)}")
                 
-            # Get pixel data
-            self.report({'INFO'}, f"Getting pixel data from render result ({width}x{height})...")
-            
-            # Check if pixels are available
-            if not render_result.has_data:
-                self.report({'ERROR'}, "Render Result has no data. Please render first by pressing F12.")
-                return None
-                
-            pixels = np.array(render_result.pixels[:])
-            
-            if len(pixels) == 0:
-                self.report({'ERROR'}, "Render result contains no pixel data")
-                return None
-                
-            # Reshape the flat array to a 2D image with RGBA channels
-            pixels = pixels.reshape((height, width, 4))
-            self.report({'INFO'}, f"Successfully got render result with shape {pixels.shape}")
-            
-            # Convert to 8-bit RGB for comparison with original images
-            pixels_rgb = (pixels[:, :, :3] * 255).astype(np.uint8)
-            return pixels_rgb
+            return render_array
             
         except Exception as e:
             import traceback
-            self.report({'ERROR'}, f"Error getting render result: {str(e)}")
+            self.report({'ERROR'}, f"Error rendering view: {str(e)}")
             traceback.print_exc()
+            
+            # Restore original render settings
+            context.scene.render.filepath = original_filepath
+            context.scene.render.image_settings.file_format = original_format
+            
             return None
     
     def calculate_metrics(self, render_array, original_image):
@@ -120,7 +133,7 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
                 self.report({'INFO'}, f"Resizing original image from {original_img.shape[:2]} to {render_array.shape[:2]}")
                 original_img = cv2.resize(original_img, (render_array.shape[1], render_array.shape[0]))
             
-            # Convert render array from RGB to BGR for comparison with OpenCV's BGR format
+            # Convert to BGR for comparison (OpenCV uses BGR)
             render_bgr = cv2.cvtColor(render_array, cv2.COLOR_RGB2BGR)
             
             # Convert to grayscale for SSIM calculation
@@ -148,15 +161,15 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             if not camera_ok:
                 return {'CANCELLED'}
             
-            # Get existing render result (doesn't perform new rendering)
-            self.report({'INFO'}, "Getting existing render result from Render Slot 1...")
-            render_array = self.get_render_result(context)
+            # Render and get result from file
+            self.report({'INFO'}, "Rendering current view...")
+            render_array = self.render_current_view(context)
             if render_array is None:
-                self.report({'ERROR'}, "No render result found. Please render first by pressing F12.")
+                self.report({'ERROR'}, "Failed to get render result")
                 return {'CANCELLED'}
             
             # Calculate metrics
-            self.report({'INFO'}, "Comparing render result with original camera image...")
+            self.report({'INFO'}, "Comparing rendered image with original...")
             psnr_value, ssim_value = self.calculate_metrics(render_array, bg_image)
             
             if psnr_value is not None and ssim_value is not None:

@@ -57,8 +57,7 @@ class RCMETRICS_PT_Panel(Panel):
         
         # Render and compare button
         row = box.row()
-        row.operator("rcmetrics.render_compare", text="Compare with Original", icon='IMAGE_RGB')
-        row.label(text="(Press F12 first to render)", icon='INFO')
+        row.operator("rcmetrics.render_compare", icon='RENDER_STILL')
         
         # Display metrics if they exist
         if rc_metrics.last_psnr > 0 or rc_metrics.last_ssim > 0:

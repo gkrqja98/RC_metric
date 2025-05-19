@@ -170,8 +170,6 @@ class RCMETRICS_OT_ImportRC(bpy.types.Operator):
             self.report({'ERROR'}, "Cannot import OpenCV (cv2). Please install the required dependencies.")
             return {'CANCELLED'}
         
-        from ..utils import camera_utils
-        
         folder_path = context.scene.rc_metrics.rc_folder
         
         # Validate folder path
@@ -204,9 +202,6 @@ class RCMETRICS_OT_ImportRC(bpy.types.Operator):
         if texture_file:
             self.report({'INFO'}, f"Applying texture: {texture_file}")
             self.apply_texture(folder_path, texture_file)
-        
-        # Update camera list for the UI
-        camera_utils.update_camera_list(context)
         
         self.report({'INFO'}, "RealityCapture import and setup completed")
         return {'FINISHED'}

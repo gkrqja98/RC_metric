@@ -112,23 +112,13 @@ def register():
         
         # Register operators
         from .operators import import_operators
-        from .operators import camera_operators
-        from .operators import metrics_operators
-        from .operators import export_operators
         
         import_operators.register()
-        camera_operators.register()
-        metrics_operators.register()
-        export_operators.register()
         
         # Register UI components
         from .ui import main_panel
-        from .ui import camera_panel
-        from .ui import metrics_panel
         
         main_panel.register()
-        camera_panel.register()
-        metrics_panel.register()
         
     except ImportError as e:
         # If missing dependencies, only register the dependencies panel
@@ -150,11 +140,7 @@ def unregister():
         # Try to unregister UI components
         try:
             from .ui import main_panel
-            from .ui import camera_panel
-            from .ui import metrics_panel
             
-            metrics_panel.unregister()
-            camera_panel.unregister()
             main_panel.unregister()
         except:
             pass
@@ -162,13 +148,7 @@ def unregister():
         # Try to unregister operators
         try:
             from .operators import import_operators
-            from .operators import camera_operators
-            from .operators import metrics_operators
-            from .operators import export_operators
             
-            export_operators.unregister()
-            metrics_operators.unregister()
-            camera_operators.unregister()
             import_operators.unregister()
         except:
             pass

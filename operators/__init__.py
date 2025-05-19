@@ -7,6 +7,7 @@ from . import import_operators
 from . import camera_operators
 from . import metrics_operators
 from . import export_operators
+from . import manual_render_operators
 
 def register():
     """Register all operators"""
@@ -14,9 +15,11 @@ def register():
     camera_operators.register()
     metrics_operators.register()
     export_operators.register()
+    manual_render_operators.register()
 
 def unregister():
     """Unregister all operators"""
+    manual_render_operators.unregister()
     export_operators.unregister()
     metrics_operators.unregister()
     camera_operators.unregister()

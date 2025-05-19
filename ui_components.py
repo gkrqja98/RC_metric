@@ -50,6 +50,9 @@ class RCMETRICS_PT_CameraPanel(Panel):
                 problematic_count = sum(1 for cam in rc_metrics.cameras if cam.has_results and cam.is_problematic)
                 if problematic_count > 0:
                     layout.label(text=f"Problematic: {problematic_count}", icon='ERROR')
+        
+        # Add refresh UI button
+        layout.operator("rcmetrics.refresh_ui", text="Refresh UI", icon='FILE_REFRESH')
 
 class RCMETRICS_PT_MetricsPanel(Panel):
     """Metrics Calculation Panel"""
@@ -105,6 +108,24 @@ class RCMETRICS_PT_MetricsPanel(Panel):
             
             # Export button
             layout.operator("rcmetrics.export_results", text="Export Results", icon='FILE_TICK')
+
+class RCMETRICS_OT_RefreshUI(Operator):
+    """Refresh the UI to show updated results"""
+    bl_idname = "rcmetrics.refresh_ui"
+    bl_label = "Refresh UI"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        # Force a redraw of all UI areas
+        for area in context.screen.areas:
+            area.tag_redraw()
+            
+        # Print debug info
+        rc_metrics = context.scene.rc_metrics
+        results_count = sum(1 for cam in rc_metrics.cameras if cam.has_results)
+        self.report({'INFO'}, f"UI refreshed. {results_count} cameras have results.")
+        
+        return {'FINISHED'}
 
 class RCMETRICS_OT_RefreshCameras(Operator):
     """Refresh the camera list"""
@@ -206,6 +227,7 @@ class RCMETRICS_OT_ExportResults(Operator):
 def register_ui():
     bpy.utils.register_class(RCMETRICS_PT_CameraPanel)
     bpy.utils.register_class(RCMETRICS_PT_MetricsPanel)
+    bpy.utils.register_class(RCMETRICS_OT_RefreshUI)
     bpy.utils.register_class(RCMETRICS_OT_RefreshCameras)
     bpy.utils.register_class(RCMETRICS_OT_SelectAllCameras)
     bpy.utils.register_class(RCMETRICS_OT_DeselectAllCameras)
@@ -218,5 +240,6 @@ def unregister_ui():
     bpy.utils.unregister_class(RCMETRICS_OT_DeselectAllCameras)
     bpy.utils.unregister_class(RCMETRICS_OT_SelectAllCameras)
     bpy.utils.unregister_class(RCMETRICS_OT_RefreshCameras)
+    bpy.utils.unregister_class(RCMETRICS_OT_RefreshUI)
     bpy.utils.unregister_class(RCMETRICS_PT_MetricsPanel)
     bpy.utils.unregister_class(RCMETRICS_PT_CameraPanel)

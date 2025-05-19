@@ -314,11 +314,20 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
                 # Process this camera
                 self.process_camera(context, camera)
                 
+                # Force UI update
+                for area in context.screen.areas:
+                    area.tag_redraw()
+                
                 # We're still processing, continue modal
                 return {'RUNNING_MODAL'}
             else:
                 # We're done, finalize and finish
                 self.finish_calculation(context)
+                
+                # Force UI update once more before finishing
+                for area in context.screen.areas:
+                    area.tag_redraw()
+                
                 return {'FINISHED'}
                 
         # Continue running modal
@@ -378,7 +387,8 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
             self._render_output = None
         
         # Start modal timer
-        self._timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        # Increase timer interval to 2.0 seconds to give more time for UI updates
+        self._timer = context.window_manager.event_timer_add(2.0, window=context.window)
         context.window_manager.modal_handler_add(self)
         
         # Set calculation in progress
@@ -415,8 +425,12 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
                     self._metrics_summary, camera.name, psnr, ssim)
                 
                 # Update UI list
-                camera_utils.update_camera_results(context, camera.name, psnr, ssim, 
+                result = camera_utils.update_camera_results(context, camera.name, psnr, ssim, 
                                                   rc_metrics.psnr_threshold, rc_metrics.ssim_threshold)
+                
+                # Debug info
+                if not result:
+                    self.report({'WARNING'}, f"Failed to update UI for camera: {camera.name}")
                 
                 # Report results
                 self.report({'INFO'}, f"Camera: {camera.name}, PSNR: {psnr:.2f}, SSIM: {ssim:.4f}")
@@ -452,6 +466,17 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
         camera_count = len(self._metrics_summary.get("cameras", []))
         self.report({'INFO'}, f"Calculation completed for {camera_count} cameras")
         self.report({'INFO'}, f"Average PSNR: {rc_metrics.average_psnr:.2f}, Average SSIM: {rc_metrics.average_ssim:.4f}")
+        
+        # Show results for cameras where update_camera_results failed
+        for cam_info in self._metrics_summary.get("cameras", []):
+            camera_name = cam_info["camera"]
+            psnr = cam_info["psnr"]
+            ssim = cam_info["ssim"]
+            print(f"Results for {camera_name}: PSNR={psnr:.2f}, SSIM={ssim:.4f}")
+        
+        # Force a final UI update
+        for area in context.screen.areas:
+            area.tag_redraw()
     
     def cancel(self, context):
         """Cancel the calculation"""
@@ -500,6 +525,17 @@ class RCMETRICS_PT_Panel(bpy.types.Panel):
         # Show calculate button only if not currently calculating
         if not rc_metrics.is_calculating:
             box.operator("rcmetrics.calculate_metrics")
+        
+        # Add Debug button
+        box = layout.box()
+        box.label(text="Debug Tools")
+        box.operator("rcmetrics.refresh_ui", text="Refresh UI", icon='FILE_REFRESH')
+        
+        # Show summary of results if available
+        if rc_metrics.has_results and not rc_metrics.is_calculating:
+            row = box.row()
+            row.label(text=f"PSNR: {rc_metrics.average_psnr:.2f}")
+            row.label(text=f"SSIM: {rc_metrics.average_ssim:.4f}")
 
 def register():
     # Register classes

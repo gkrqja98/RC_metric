@@ -149,6 +149,11 @@ def update_camera_results(context, camera_name, psnr, ssim, threshold_psnr=30.0,
     """Update the results for a specific camera"""
     rc_metrics = context.scene.rc_metrics
     
+    # Debug print to help troubleshoot
+    print(f"Updating results for camera: {camera_name}")
+    print(f"Values: PSNR={psnr:.2f}, SSIM={ssim:.4f}")
+    
+    found = False
     for i, cam_item in enumerate(rc_metrics.cameras):
         if cam_item.name == camera_name:
             cam_item.psnr = psnr
@@ -160,4 +165,16 @@ def update_camera_results(context, camera_name, psnr, ssim, threshold_psnr=30.0,
             
             # Update the active camera index to show this camera
             rc_metrics.active_camera_index = i
+            found = True
+            print(f"Updated camera {camera_name} with PSNR={psnr:.2f}, SSIM={ssim:.4f}")
             break
+    
+    if not found:
+        print(f"WARNING: Camera {camera_name} not found in the list!")
+        print(f"Available cameras: {[cam.name for cam in rc_metrics.cameras]}")
+    
+    # Force a redraw of all UI areas
+    for area in context.screen.areas:
+        area.tag_redraw()
+    
+    return found

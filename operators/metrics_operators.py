@@ -66,6 +66,7 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
         # Import required modules
         from ..utils import camera_utils
         from ..utils import render_utils
+        from ..utils import image_utils
         
         # Check active object
         if not context.active_object or context.active_object.type != 'MESH':
@@ -84,12 +85,27 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
                 self.report({'ERROR'}, f"Could not create output directory: {rc_metrics.metrics_output}")
                 return {'CANCELLED'}
         
-        # Get enabled cameras
+        # Get enabled camera (only one should be enabled)
         self._camera_queue = camera_utils.get_enabled_cameras(context)
         
         if not self._camera_queue:
-            self.report({'ERROR'}, "No cameras selected for calculation")
+            # No camera selected, try to select the active one
+            active_index = rc_metrics.active_camera_index
+            if 0 <= active_index < len(rc_metrics.cameras):
+                camera_name = camera_utils.select_single_camera(context, active_index)
+                if camera_name:
+                    self.report({'INFO'}, f"Auto-selected camera: {camera_name}")
+                    # Re-check if we have the camera now
+                    self._camera_queue = camera_utils.get_enabled_cameras(context)
+        
+        if not self._camera_queue:
+            self.report({'ERROR'}, "No camera selected. Please select a camera first.")
             return {'CANCELLED'}
+        
+        if len(self._camera_queue) > 1:
+            self.report({'WARNING'}, f"Multiple cameras selected ({len(self._camera_queue)}). Only the first one will be used.")
+            # Keep only the first camera
+            self._camera_queue = [self._camera_queue[0]]
             
         # Initialize calculation
         self._total_cameras = len(self._camera_queue)
@@ -128,15 +144,27 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
         rc_metrics.calculation_progress = 0.0
         rc_metrics.has_results = False
         
-        self.report({'INFO'}, f"Starting calculation for {self._total_cameras} cameras")
+        self.report({'INFO'}, f"Starting calculation for camera: {self._camera_queue[0].name}")
         return {'RUNNING_MODAL'}
     
     def process_camera(self, context, camera):
         """Process a single camera"""
         from ..utils import camera_utils
         from ..utils import render_utils
+        from ..utils import image_utils
         
         rc_metrics = context.scene.rc_metrics
+        
+        # First, get the reference image
+        self.report({'INFO'}, f"Getting reference image for camera: {camera.name}")
+        ref_img = render_utils.get_camera_background_image(camera)
+        
+        # Debug info for reference image
+        if ref_img is None:
+            self.report({'WARNING'}, f"Failed to get reference image for camera: {camera.name}")
+            return False
+        else:
+            self.report({'INFO'}, f"Reference image for {camera.name}: shape={ref_img.shape}")
         
         # Render from this camera
         if rc_metrics.save_renders:
@@ -147,12 +175,17 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
             self.report({'INFO'}, f"Processing camera: {camera.name}")
             rendered_img = render_utils.render_from_camera(context, camera, None)
         
-        # Get the reference image
-        ref_img = render_utils.get_camera_background_image(camera)
+        # Debug info for rendered image
+        if rendered_img is None:
+            self.report({'WARNING'}, f"Failed to get rendered image for camera: {camera.name}")
+            return False
+        else:
+            self.report({'INFO'}, f"Rendered image for {camera.name}: shape={rendered_img.shape}")
         
         # Calculate metrics
         if ref_img is not None and rendered_img is not None:
-            psnr, ssim = render_utils.calculate_image_metrics(ref_img, rendered_img)
+            self.report({'INFO'}, f"Calculating metrics between images...")
+            psnr, ssim = image_utils.calculate_image_metrics(ref_img, rendered_img)
             
             if psnr is not None and ssim is not None:
                 # Update metrics summary
@@ -176,7 +209,9 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
                 rc_metrics.has_results = True
                 
                 return True
-            
+            else:
+                self.report({'WARNING'}, f"Metrics calculation failed. Check the image dimensions and content.")
+        
         self.report({'WARNING'}, f"Could not calculate metrics for camera: {camera.name}")
         return False
     

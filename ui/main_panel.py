@@ -35,6 +35,14 @@ class RCMETRICS_PT_Panel(Panel):
         else:
             box.label(text="No mesh selected", icon='ERROR')
             
+        # Show selected camera
+        enabled_cameras = [cam for cam in rc_metrics.cameras if cam.enabled]
+        if enabled_cameras:
+            box.label(text=f"Selected camera: {enabled_cameras[0].name}", icon='CAMERA_DATA')
+        else:
+            box.label(text="No camera selected", icon='ERROR')
+            box.label(text="Select a camera in Camera Selection panel")
+            
         box.prop(rc_metrics, "metrics_output")
         
         # Show calculate button only if not currently calculating

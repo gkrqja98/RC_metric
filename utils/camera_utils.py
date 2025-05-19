@@ -36,7 +36,7 @@ def update_camera_list(context):
     for cam in cameras:
         item = rc_metrics.cameras.add()
         item.name = cam.name
-        item.enabled = True
+        item.enabled = False  # Start with all disabled
         item.has_results = False
         
     # Set the active camera index
@@ -47,14 +47,21 @@ def update_camera_list(context):
     
     return len(rc_metrics.cameras)
 
-def select_all_cameras(context, select=True):
-    """Select or deselect all cameras in the list"""
+def select_single_camera(context, index):
+    """Select only one camera by index"""
     rc_metrics = context.scene.rc_metrics
     
+    # Deselect all cameras first
     for cam in rc_metrics.cameras:
-        cam.enabled = select
+        cam.enabled = False
     
-    return len(rc_metrics.cameras)
+    # Select only the specified camera
+    if 0 <= index < len(rc_metrics.cameras):
+        rc_metrics.cameras[index].enabled = True
+        rc_metrics.active_camera_index = index
+        return rc_metrics.cameras[index].name
+    
+    return None
 
 def get_enabled_cameras(context):
     """Get a list of camera objects that are enabled in the UI"""

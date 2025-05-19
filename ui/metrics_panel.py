@@ -53,13 +53,27 @@ class RCMETRICS_PT_MetricsPanel(Panel):
         # Results summary if available
         if rc_metrics.has_results and not rc_metrics.is_calculating:
             box = layout.box()
-            box.label(text="Results Summary:")
-            box.label(text=f"Average PSNR: {rc_metrics.average_psnr:.2f}")
-            box.label(text=f"Average SSIM: {rc_metrics.average_ssim:.4f}")
+            box.label(text="Results for Selected Camera:")
+            
+            # Find the camera with results
+            for cam in rc_metrics.cameras:
+                if cam.has_results:
+                    box.label(text=f"Camera: {cam.name}")
+                    
+                    # Determine color based on thresholds
+                    if cam.psnr < rc_metrics.psnr_threshold:
+                        box.label(text=f"PSNR: {cam.psnr:.2f}", icon='ERROR')
+                    else:
+                        box.label(text=f"PSNR: {cam.psnr:.2f}", icon='CHECKMARK')
+                        
+                    if cam.ssim < rc_metrics.ssim_threshold:
+                        box.label(text=f"SSIM: {cam.ssim:.4f}", icon='ERROR')
+                    else:
+                        box.label(text=f"SSIM: {cam.ssim:.4f}", icon='CHECKMARK')
+                    break
             
             # Export buttons
-            layout.operator("rcmetrics.export_results", text="Export JSON", icon='FILE_TICK')
-            layout.operator("rcmetrics.export_report", text="Export HTML Report", icon='TEXT')
+            layout.operator("rcmetrics.export_results", text="Export Results", icon='FILE_TICK')
 
 # Registration
 def register():

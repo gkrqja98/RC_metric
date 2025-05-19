@@ -4,6 +4,7 @@ This module handles image calculations and metrics.
 """
 
 import numpy as np
+import os
 
 def calculate_image_metrics(ref_img, rendered_img):
     """
@@ -15,21 +16,66 @@ def calculate_image_metrics(ref_img, rendered_img):
         from skimage.metrics import structural_similarity, peak_signal_noise_ratio
         
         if ref_img is None or rendered_img is None:
-            raise ValueError("One of the images is None")
+            print("One of the images is None")
+            return None, None
+        
+        # Check if images are valid
+        if ref_img.size == 0 or rendered_img.size == 0:
+            print("One of the images is empty")
+            return None, None
+            
+        # Print image shapes for debugging
+        print(f"Reference image shape: {ref_img.shape}")
+        print(f"Rendered image shape: {rendered_img.shape}")
+        
+        # Check for minimum image dimensions
+        if ref_img.shape[0] < 10 or ref_img.shape[1] < 10 or rendered_img.shape[0] < 10 or rendered_img.shape[1] < 10:
+            print("Image dimensions are too small (less than 10 pixels)")
+            return None, None
             
         # Ensure same dimensions
         if ref_img.shape != rendered_img.shape:
-            rendered_img = cv2.resize(rendered_img, (ref_img.shape[1], ref_img.shape[0]))
+            print(f"Resizing rendered image from {rendered_img.shape} to {ref_img.shape}")
+            try:
+                # Make sure we have valid dimensions before resizing
+                if ref_img.shape[0] > 0 and ref_img.shape[1] > 0:
+                    rendered_img = cv2.resize(rendered_img, (ref_img.shape[1], ref_img.shape[0]))
+                else:
+                    print("Reference image has invalid dimensions")
+                    return None, None
+            except Exception as e:
+                print(f"Error during resize: {e}")
+                return None, None
+            
+        # Verify images again after resize
+        if ref_img.shape != rendered_img.shape:
+            print(f"Images still have different shapes after resize: {ref_img.shape} vs {rendered_img.shape}")
+            return None, None
             
         # Convert to grayscale for SSIM
-        ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-        rendered_gray = cv2.cvtColor(rendered_img, cv2.COLOR_BGR2GRAY)
+        try:
+            # Let's save these images for debugging if needed
+            print("Converting images to grayscale for SSIM calculation")
+            ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+            rendered_gray = cv2.cvtColor(rendered_img, cv2.COLOR_BGR2GRAY)
+        except Exception as e:
+            print(f"Error converting to grayscale: {e}")
+            return None, None
         
         # Calculate metrics
-        psnr = peak_signal_noise_ratio(ref_img, rendered_img)
-        ssim = structural_similarity(ref_gray, rendered_gray)
-        
-        return psnr, ssim
+        try:
+            print("Calculating PSNR...")
+            psnr = peak_signal_noise_ratio(ref_img, rendered_img)
+            print(f"PSNR result: {psnr}")
+            
+            print("Calculating SSIM...")
+            ssim = structural_similarity(ref_gray, rendered_gray)
+            print(f"SSIM result: {ssim}")
+            
+            return psnr, ssim
+        except Exception as e:
+            print(f"Error calculating metrics values: {e}")
+            return None, None
         
     except Exception as e:
         print(f"Error calculating metrics: {e}")

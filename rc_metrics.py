@@ -1,7 +1,20 @@
+import bpy
+import os
+import json
+import time
+import numpy as np
+from bpy.props import (StringProperty, BoolProperty, FloatProperty, 
+                      EnumProperty, IntProperty, CollectionProperty, PointerProperty)
+from bpy.types import PropertyGroup
+
+from . import camera_utils
+from . import render_utils
+from . import ui_components
+
 bl_info = {
     "name": "RealityCapture Metrics",
-    "author": "Claude",
-    "version": (1, 0),
+    "author": "Your Name",
+    "version": (1, 1),
     "blender": (2, 93, 0),
     "location": "View3D > Sidebar > RC Metrics",
     "description": "Import RealityCapture results and calculate metrics",
@@ -10,29 +23,71 @@ bl_info = {
     "category": "3D View",
 }
 
-import bpy
-import os
-import numpy as np
-from mathutils import Vector
-import math
-from skimage.metrics import structural_similarity, peak_signal_noise_ratio
-import cv2
-import json
-
-class RCMetricsProperties(bpy.types.PropertyGroup):
-    rc_folder: bpy.props.StringProperty(
+# RealityCapture Metrics Property Group
+class RCMetricsProperties(PropertyGroup):
+    rc_folder: StringProperty(
         name="RC Result Folder",
         description="Path to the RealityCapture result folder",
         default="",
         subtype='DIR_PATH'
     )
     
-    metrics_output: bpy.props.StringProperty(
+    metrics_output: StringProperty(
         name="Metrics Output",
         description="Path to save the metrics results",
         default="",
         subtype='DIR_PATH'
     )
+    
+    # Camera list and selection
+    cameras: CollectionProperty(type=camera_utils.RCCamera)
+    active_camera_index: IntProperty(default=0)
+    
+    # Rendering options
+    save_renders: BoolProperty(
+        name="Save Renders",
+        description="Save rendered images to disk",
+        default=True
+    )
+    
+    render_quality: EnumProperty(
+        name="Render Quality",
+        description="Quality settings for rendering",
+        items=[
+            ('preview', "Preview", "Fast, low-quality rendering (32 samples)"),
+            ('medium', "Medium", "Balanced rendering (64 samples)"),
+            ('high', "High", "High-quality rendering (128 samples)"),
+            ('final', "Final", "Production-quality rendering (256 samples)"),
+        ],
+        default='preview'
+    )
+    
+    # Threshold settings
+    psnr_threshold: FloatProperty(
+        name="PSNR Threshold",
+        description="Minimum acceptable PSNR value",
+        default=30.0,
+        min=0.0,
+        soft_max=50.0
+    )
+    
+    ssim_threshold: FloatProperty(
+        name="SSIM Threshold",
+        description="Minimum acceptable SSIM value",
+        default=0.9,
+        min=0.0,
+        max=1.0
+    )
+    
+    # Calculation progress
+    is_calculating: BoolProperty(default=False)
+    calculation_progress: FloatProperty(default=0.0, min=0.0, max=100.0)
+    current_camera: StringProperty(default="")
+    
+    # Results
+    has_results: BoolProperty(default=False)
+    average_psnr: FloatProperty(default=0.0)
+    average_ssim: FloatProperty(default=0.0)
 
 class RCMETRICS_OT_ImportRC(bpy.types.Operator):
     """Import RealityCapture results and setup cameras"""
@@ -184,6 +239,8 @@ class RCMETRICS_OT_ImportRC(bpy.types.Operator):
         return True
     
     def execute(self, context):
+        import cv2  # Import here to avoid issues if not installed
+        
         folder_path = context.scene.rc_metrics.rc_folder
         
         # Validate folder path
@@ -217,112 +274,86 @@ class RCMETRICS_OT_ImportRC(bpy.types.Operator):
             self.report({'INFO'}, f"Applying texture: {texture_file}")
             self.apply_texture(folder_path, texture_file)
         
+        # Update camera list for the UI
+        camera_utils.update_camera_list(context)
+        
         self.report({'INFO'}, "RealityCapture import and setup completed")
         return {'FINISHED'}
 
 class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
-    """Render current mesh from all cameras and calculate metrics"""
+    """Render current mesh from selected cameras and calculate metrics"""
     bl_idname = "rcmetrics.calculate_metrics"
     bl_label = "2. Calculate Metrics"
     bl_options = {'REGISTER', 'UNDO'}
     
-    def setup_render_settings(self, context):
-        """Setup render settings for evaluation"""
-        scene = context.scene
-        # Set render engine
-        scene.render.engine = 'CYCLES'
-        # Set render settings for faster preview quality
-        scene.cycles.samples = 32
-        scene.render.resolution_percentage = 100
-        # Disable film transparency so we get just the render
-        scene.render.film_transparent = False
-        
-    def render_from_camera(self, context, camera, output_path):
-        """Render the scene from a specific camera and save the image"""
-        scene = context.scene
-        scene.camera = camera
-        
-        # Store original filepath
-        original_filepath = scene.render.filepath
-        
-        # Set output path for this render
-        scene.render.filepath = output_path
-        
-        # Render
-        bpy.ops.render.render(write_still=True)
-        
-        # Restore original filepath
-        scene.render.filepath = original_filepath
-        
-        return True
+    _timer = None
+    _camera_queue = []
+    _metrics_summary = {}
     
-    def calculate_image_metrics(self, ref_img_path, rendered_img_path):
-        """Calculate PSNR and SSIM between two images"""
-        try:
-            # Read images
-            ref_img = cv2.imread(ref_img_path)
-            rendered_img = cv2.imread(rendered_img_path)
+    def modal(self, context, event):
+        """Modal function for handling the metrics calculation"""
+        rc_metrics = context.scene.rc_metrics
+        
+        # Check if calculation should be cancelled
+        if not rc_metrics.is_calculating:
+            self.cancel(context)
+            return {'CANCELLED'}
             
-            if ref_img is None:
-                raise ValueError(f"Could not read reference image: {ref_img_path}")
-            if rendered_img is None:
-                raise ValueError(f"Could not read rendered image: {rendered_img_path}")
+        # Process timer events
+        if event.type == 'TIMER':
+            # If we have cameras to process
+            if self._camera_queue:
+                # Get the next camera
+                camera = self._camera_queue.pop(0)
+                rc_metrics.current_camera = camera.name
                 
-            # Ensure same dimensions
-            if ref_img.shape != rendered_img.shape:
-                rendered_img = cv2.resize(rendered_img, (ref_img.shape[1], ref_img.shape[0]))
+                # Update progress
+                progress = 100.0 * (1.0 - len(self._camera_queue) / self._total_cameras)
+                rc_metrics.calculation_progress = progress
                 
-            # Convert to grayscale for SSIM
-            ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-            rendered_gray = cv2.cvtColor(rendered_img, cv2.COLOR_BGR2GRAY)
-            
-            # Calculate metrics
-            psnr = peak_signal_noise_ratio(ref_img, rendered_img)
-            ssim = structural_similarity(ref_gray, rendered_gray)
-            
-            return psnr, ssim
-            
-        except Exception as e:
-            print(f"Error calculating metrics: {e}")
-            return None, None
+                # Process this camera
+                self.process_camera(context, camera)
+                
+                # We're still processing, continue modal
+                return {'RUNNING_MODAL'}
+            else:
+                # We're done, finalize and finish
+                self.finish_calculation(context)
+                return {'FINISHED'}
+                
+        # Continue running modal
+        return {'RUNNING_MODAL'}
     
-    def execute(self, context):
-        # Ensure we have an active object (the mesh to evaluate)
+    def invoke(self, context, event):
+        """Start the modal timer"""
+        # Check active object
         if not context.active_object or context.active_object.type != 'MESH':
             self.report({'ERROR'}, "Please select a mesh object to evaluate")
             return {'CANCELLED'}
             
         # Get folder paths
-        rc_folder = context.scene.rc_metrics.rc_folder
-        metrics_output = context.scene.rc_metrics.metrics_output
+        rc_metrics = context.scene.rc_metrics
         
-        if not metrics_output:
+        if not rc_metrics.metrics_output and rc_metrics.save_renders:
             # Create a default output folder if not specified
-            metrics_output = os.path.join(rc_folder, "metrics_output")
+            rc_metrics.metrics_output = os.path.join(rc_metrics.rc_folder, "metrics_output")
             try:
-                os.makedirs(metrics_output, exist_ok=True)
+                os.makedirs(rc_metrics.metrics_output, exist_ok=True)
             except:
-                self.report({'ERROR'}, f"Could not create output directory: {metrics_output}")
+                self.report({'ERROR'}, f"Could not create output directory: {rc_metrics.metrics_output}")
                 return {'CANCELLED'}
         
-        # Setup render settings
-        self.setup_render_settings(context)
+        # Get enabled cameras
+        self._camera_queue = camera_utils.get_enabled_cameras(context)
         
-        # Create results folder
-        render_output = os.path.join(metrics_output, "renders")
-        try:
-            os.makedirs(render_output, exist_ok=True)
-        except:
-            self.report({'ERROR'}, f"Could not create render output directory: {render_output}")
+        if not self._camera_queue:
+            self.report({'ERROR'}, "No cameras selected for calculation")
             return {'CANCELLED'}
-        
-        # Get selected mesh object
-        mesh_obj = context.active_object
-        
-        # Prepare to collect metrics
-        metrics_results = {}
-        metrics_summary = {
-            "mesh_name": mesh_obj.name,
+            
+        # Initialize calculation
+        self._total_cameras = len(self._camera_queue)
+        self._metrics_summary = {
+            "mesh_name": context.active_object.name,
             "cameras": [],
             "average_psnr": 0.0,
             "average_ssim": 0.0,
@@ -332,82 +363,107 @@ class RCMETRICS_OT_CalculateMetrics(bpy.types.Operator):
             "max_ssim": 0.0
         }
         
-        total_psnr = 0.0
-        total_ssim = 0.0
-        valid_cameras = 0
+        # Setup render settings
+        render_utils.setup_render_settings(context, rc_metrics.render_quality)
         
-        # Process all cameras
-        for obj in bpy.data.objects:
-            if obj.type == 'CAMERA':
-                cam_name = obj.name
-                # Check if this camera has a matching background image
-                if not obj.data.background_images or not obj.data.background_images[0].image:
-                    continue
-                    
-                # Get the reference image path
-                ref_img_name = cam_name
-                ref_img_path = os.path.join(rc_folder, ref_img_name)
-                
-                if not os.path.exists(ref_img_path):
-                    self.report({'WARNING'}, f"Reference image does not exist: {ref_img_path}")
-                    continue
-                
-                # Render from this camera
-                render_img_path = os.path.join(render_output, f"{cam_name.split('.')[0]}_render.png")
-                self.report({'INFO'}, f"Rendering from camera: {cam_name}")
-                
-                if not self.render_from_camera(context, obj, render_img_path):
-                    self.report({'WARNING'}, f"Failed to render from camera: {cam_name}")
-                    continue
-                
-                # Calculate metrics
-                psnr, ssim = self.calculate_image_metrics(ref_img_path, render_img_path)
-                
-                if psnr is not None and ssim is not None:
-                    # Store results
-                    metrics_results[cam_name] = {
-                        "psnr": psnr,
-                        "ssim": ssim,
-                        "reference": ref_img_path,
-                        "render": render_img_path
-                    }
-                    
-                    # Update summary
-                    total_psnr += psnr
-                    total_ssim += ssim
-                    valid_cameras += 1
-                    
-                    metrics_summary["min_psnr"] = min(metrics_summary["min_psnr"], psnr)
-                    metrics_summary["min_ssim"] = min(metrics_summary["min_ssim"], ssim)
-                    metrics_summary["max_psnr"] = max(metrics_summary["max_psnr"], psnr)
-                    metrics_summary["max_ssim"] = max(metrics_summary["max_ssim"], ssim)
-                    
-                    metrics_summary["cameras"].append({
-                        "camera": cam_name,
-                        "psnr": psnr,
-                        "ssim": ssim
-                    })
-                    
-                    self.report({'INFO'}, f"Camera: {cam_name}, PSNR: {psnr:.2f}, SSIM: {ssim:.4f}")
-        
-        # Calculate averages
-        if valid_cameras > 0:
-            metrics_summary["average_psnr"] = total_psnr / valid_cameras
-            metrics_summary["average_ssim"] = total_ssim / valid_cameras
-            
-            # Save metrics to file
-            metrics_file = os.path.join(metrics_output, f"metrics_{mesh_obj.name}.json")
-            with open(metrics_file, 'w') as f:
-                json.dump(metrics_summary, f, indent=4)
-                
-            self.report({'INFO'}, f"Metrics calculated for {valid_cameras} cameras")
-            self.report({'INFO'}, f"Average PSNR: {metrics_summary['average_psnr']:.2f}, Average SSIM: {metrics_summary['average_ssim']:.4f}")
-            self.report({'INFO'}, f"Metrics saved to: {metrics_file}")
+        # Create render output if saving renders
+        if rc_metrics.save_renders:
+            self._render_output = os.path.join(rc_metrics.metrics_output, "renders")
+            try:
+                os.makedirs(self._render_output, exist_ok=True)
+            except:
+                self.report({'ERROR'}, f"Could not create render output directory: {self._render_output}")
+                return {'CANCELLED'}
         else:
-            self.report({'ERROR'}, "No valid cameras processed")
-            return {'CANCELLED'}
+            self._render_output = None
         
-        return {'FINISHED'}
+        # Start modal timer
+        self._timer = context.window_manager.event_timer_add(0.5, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        
+        # Set calculation in progress
+        rc_metrics.is_calculating = True
+        rc_metrics.calculation_progress = 0.0
+        rc_metrics.has_results = False
+        
+        self.report({'INFO'}, f"Starting calculation for {self._total_cameras} cameras")
+        return {'RUNNING_MODAL'}
+    
+    def process_camera(self, context, camera):
+        """Process a single camera"""
+        rc_metrics = context.scene.rc_metrics
+        
+        # Render from this camera
+        if rc_metrics.save_renders:
+            render_img_path = os.path.join(self._render_output, f"{camera.name.split('.')[0]}_render.png")
+            self.report({'INFO'}, f"Rendering from camera: {camera.name}")
+            rendered_img = render_utils.render_from_camera(context, camera, render_img_path)
+        else:
+            self.report({'INFO'}, f"Processing camera: {camera.name}")
+            rendered_img = render_utils.render_from_camera(context, camera, None)
+        
+        # Get the reference image
+        ref_img = render_utils.get_camera_background_image(camera)
+        
+        # Calculate metrics
+        if ref_img is not None and rendered_img is not None:
+            psnr, ssim = render_utils.calculate_image_metrics(ref_img, rendered_img)
+            
+            if psnr is not None and ssim is not None:
+                # Update metrics summary
+                self._metrics_summary = render_utils.update_metrics_summary(
+                    self._metrics_summary, camera.name, psnr, ssim)
+                
+                # Update UI list
+                camera_utils.update_camera_results(context, camera.name, psnr, ssim, 
+                                                  rc_metrics.psnr_threshold, rc_metrics.ssim_threshold)
+                
+                # Report results
+                self.report({'INFO'}, f"Camera: {camera.name}, PSNR: {psnr:.2f}, SSIM: {ssim:.4f}")
+                
+                # Update averages in the UI
+                rc_metrics.average_psnr = self._metrics_summary["average_psnr"]
+                rc_metrics.average_ssim = self._metrics_summary["average_ssim"]
+                rc_metrics.has_results = True
+                
+                return True
+            
+        self.report({'WARNING'}, f"Could not calculate metrics for camera: {camera.name}")
+        return False
+    
+    def finish_calculation(self, context):
+        """Finish the calculation and clean up"""
+        rc_metrics = context.scene.rc_metrics
+        
+        # Save metrics to file if we have results and are saving renders
+        if rc_metrics.has_results and rc_metrics.save_renders:
+            metrics_file = os.path.join(rc_metrics.metrics_output, 
+                                        f"metrics_{self._metrics_summary['mesh_name']}.json")
+            with open(metrics_file, 'w') as f:
+                json.dump(self._metrics_summary, f, indent=4)
+                
+            self.report({'INFO'}, f"Metrics saved to: {metrics_file}")
+        
+        # Clean up
+        rc_metrics.is_calculating = False
+        rc_metrics.calculation_progress = 100.0
+        rc_metrics.current_camera = ""
+        
+        camera_count = len(self._metrics_summary.get("cameras", []))
+        self.report({'INFO'}, f"Calculation completed for {camera_count} cameras")
+        self.report({'INFO'}, f"Average PSNR: {rc_metrics.average_psnr:.2f}, Average SSIM: {rc_metrics.average_ssim:.4f}")
+    
+    def cancel(self, context):
+        """Cancel the calculation"""
+        if self._timer:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+            
+        # Clean up
+        context.scene.rc_metrics.is_calculating = False
+        context.scene.rc_metrics.current_camera = ""
+        
+        self.report({'INFO'}, "Calculation cancelled")
 
 class RCMETRICS_PT_Panel(bpy.types.Panel):
     """RC Metrics Panel"""
@@ -440,20 +496,39 @@ class RCMETRICS_PT_Panel(bpy.types.Panel):
             box.label(text="No mesh selected", icon='ERROR')
             
         box.prop(rc_metrics, "metrics_output")
-        box.operator("rcmetrics.calculate_metrics")
+        
+        # Show calculate button only if not currently calculating
+        if not rc_metrics.is_calculating:
+            box.operator("rcmetrics.calculate_metrics")
 
 def register():
+    # Register classes
+    bpy.utils.register_class(camera_utils.RCCamera)
+    bpy.utils.register_class(camera_utils.RCMETRICS_UL_CamerasList)
     bpy.utils.register_class(RCMetricsProperties)
     bpy.utils.register_class(RCMETRICS_OT_ImportRC)
     bpy.utils.register_class(RCMETRICS_OT_CalculateMetrics)
     bpy.utils.register_class(RCMETRICS_PT_Panel)
+    
+    # Register UI components
+    ui_components.register_ui()
+    
+    # Register properties
     bpy.types.Scene.rc_metrics = bpy.props.PointerProperty(type=RCMetricsProperties)
     
 def unregister():
+    # Unregister UI components
+    ui_components.unregister_ui()
+    
+    # Unregister classes
     bpy.utils.unregister_class(RCMETRICS_PT_Panel)
     bpy.utils.unregister_class(RCMETRICS_OT_CalculateMetrics)
     bpy.utils.unregister_class(RCMETRICS_OT_ImportRC)
     bpy.utils.unregister_class(RCMetricsProperties)
+    bpy.utils.unregister_class(camera_utils.RCMETRICS_UL_CamerasList)
+    bpy.utils.unregister_class(camera_utils.RCCamera)
+    
+    # Unregister properties
     del bpy.types.Scene.rc_metrics
     
 if __name__ == "__main__":

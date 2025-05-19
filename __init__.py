@@ -1,10 +1,12 @@
 import bpy
-from . import rc_metrics
+import importlib
+import sys
+import os
 
 bl_info = {
     "name": "RealityCapture Metrics",
     "author": "Your Name",
-    "version": (1, 0),
+    "version": (1, 1),
     "blender": (2, 93, 0),
     "location": "View3D > Sidebar > RC Metrics",
     "description": "Import RealityCapture results and calculate metrics",
@@ -69,12 +71,19 @@ def register():
         import cv2
         import skimage.metrics
         
-        # Register the main add-on
-        bpy.utils.register_class(rc_metrics.RCMetricsProperties)
-        bpy.utils.register_class(rc_metrics.RCMETRICS_OT_ImportRC)
-        bpy.utils.register_class(rc_metrics.RCMETRICS_OT_CalculateMetrics)
-        bpy.utils.register_class(rc_metrics.RCMETRICS_PT_Panel)
-        bpy.types.Scene.rc_metrics = bpy.props.PointerProperty(type=rc_metrics.RCMetricsProperties)
+        # Reload modules if needed (for development)
+        if "rc_metrics" in sys.modules:
+            importlib.reload(sys.modules["rc_metrics"])
+        if "camera_utils" in sys.modules:
+            importlib.reload(sys.modules["camera_utils"])
+        if "render_utils" in sys.modules:
+            importlib.reload(sys.modules["render_utils"])
+        if "ui_components" in sys.modules:
+            importlib.reload(sys.modules["ui_components"])
+        
+        # Import and register the main module
+        from . import rc_metrics
+        rc_metrics.register()
         
     except ImportError as e:
         # If missing dependencies, only register the dependencies panel
@@ -93,13 +102,10 @@ def unregister():
         except:
             pass
         
-        # Try to unregister main add-on
+        # Try to unregister main module
         try:
-            bpy.utils.unregister_class(rc_metrics.RCMETRICS_PT_Panel)
-            bpy.utils.unregister_class(rc_metrics.RCMETRICS_OT_CalculateMetrics)
-            bpy.utils.unregister_class(rc_metrics.RCMETRICS_OT_ImportRC)
-            bpy.utils.unregister_class(rc_metrics.RCMetricsProperties)
-            del bpy.types.Scene.rc_metrics
+            from . import rc_metrics
+            rc_metrics.unregister()
         except:
             pass
     except:

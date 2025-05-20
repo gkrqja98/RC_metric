@@ -38,6 +38,63 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             
         return True, bg_image
     
+    def setup_scene_for_rendering(self, context, render_selected_only=False, selection_type='MESH', selected_mesh=None, selected_collection=None):
+        """Setup the scene for rendering, optionally hiding other objects"""
+        # Store original visibility states
+        original_visibilities = {}
+        for obj in context.scene.objects:
+            # Only process mesh objects
+            if obj.type == 'MESH':
+                original_visibilities[obj.name] = obj.hide_render
+        
+        # If we're only rendering the selected mesh/collection, hide everything else
+        if render_selected_only:
+            if selection_type == 'MESH' and selected_mesh:
+                self.report({'INFO'}, f"Rendering only selected mesh: {selected_mesh}")
+                for obj in context.scene.objects:
+                    if obj.type == 'MESH':
+                        if obj.name == selected_mesh:
+                            obj.hide_render = False  # Show the selected mesh
+                        else:
+                            obj.hide_render = True   # Hide other meshes
+            
+            elif selection_type == 'COLLECTION' and selected_collection:
+                self.report({'INFO'}, f"Rendering only objects in collection: {selected_collection}")
+                collection = bpy.data.collections.get(selected_collection)
+                
+                if collection:
+                    # Get all objects in the collection (including nested ones)
+                    collection_objects = set()
+                    
+                    def get_objects_from_collection(coll, obj_set):
+                        # Add direct objects
+                        for obj in coll.objects:
+                            if obj.type == 'MESH':
+                                obj_set.add(obj.name)
+                        
+                        # Add objects from child collections
+                        for child_coll in coll.children:
+                            get_objects_from_collection(child_coll, obj_set)
+                    
+                    get_objects_from_collection(collection, collection_objects)
+                    
+                    # Show/hide objects based on collection membership
+                    for obj in context.scene.objects:
+                        if obj.type == 'MESH':
+                            if obj.name in collection_objects:
+                                obj.hide_render = False  # Show collection objects
+                            else:
+                                obj.hide_render = True   # Hide other objects
+        
+        return original_visibilities
+
+    def restore_scene_after_rendering(self, context, original_visibilities):
+        """Restore the original visibility states of objects"""
+        for obj_name, hide_state in original_visibilities.items():
+            obj = context.scene.objects.get(obj_name)
+            if obj:
+                obj.hide_render = hide_state
+    
     def render_current_view(self, context):
         """Render the current view and return the render result"""
         try:
@@ -64,14 +121,14 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             # Check if file was created
             if not os.path.exists(temp_file):
                 self.report({'ERROR'}, f"Temporary render file was not created: {temp_file}")
-                return None
+                return None, None
             
             # Load the saved image using OpenCV to get the RGBA data
             import cv2
             render_array = cv2.imread(temp_file, cv2.IMREAD_UNCHANGED)  # Load with alpha channel
             if render_array is None:
                 self.report({'ERROR'}, f"Could not read temporary render file with OpenCV: {temp_file}")
-                return None
+                return None, None
                 
             # Convert from BGRA to RGBA if needed
             if render_array.shape[2] == 4:  # Check if we have alpha channel
@@ -117,7 +174,7 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             context.scene.render.filepath = original_filepath
             context.scene.render.image_settings.file_format = original_format
             
-            return None
+            return None, None
     
     def create_diff_image(self, render_array, original_img, context):
         """Create a difference image between rendered and original images"""
@@ -373,9 +430,27 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             if not camera_ok:
                 return {'CANCELLED'}
             
+            # Check if we have a selected mesh
+            rc_metrics = context.scene.rc_metrics
+            selected_mesh = rc_metrics.selected_mesh
+            if not selected_mesh or selected_mesh == 'None':
+                self.report({'ERROR'}, "No mesh selected. Please select a mesh first!")
+                return {'CANCELLED'}
+            
+            # Setup scene for rendering (hide/show objects as needed)
+            original_visibilities = self.setup_scene_for_rendering(
+                context, 
+                rc_metrics.render_selected_mesh_only, 
+                selected_mesh
+            )
+            
             # Render and get result from file
             self.report({'INFO'}, "Rendering current view...")
             render_array, render_img = self.render_current_view(context)
+            
+            # Restore original visibility settings
+            self.restore_scene_after_rendering(context, original_visibilities)
+            
             if render_array is None:
                 self.report({'ERROR'}, "Failed to get render result")
                 return {'CANCELLED'}

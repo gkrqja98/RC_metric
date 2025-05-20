@@ -28,12 +28,18 @@ class RCMETRICS_PT_Panel(Panel):
         
         # Camera rendering and comparison section
         layout.separator()
-        layout.label(text="Camera Rendering & Metrics")
+        layout.label(text="Camera & Mesh Selection", icon='GROUP_VERTEX')
         
         box = layout.box()
         
         # Camera selector dropdown
         box.prop(rc_metrics, "selected_camera")
+        
+        # Mesh selector dropdown
+        box.prop(rc_metrics, "selected_mesh")
+        
+        # Option to render only selected mesh
+        box.prop(rc_metrics, "render_selected_mesh_only")
         
         # Check active camera and guide user
         if not scene.camera:
@@ -55,9 +61,22 @@ class RCMETRICS_PT_Panel(Panel):
             else:
                 box.label(text="No background image assigned", icon='ERROR')
         
+        # Check if selected mesh exists
+        if rc_metrics.selected_mesh and rc_metrics.selected_mesh != 'None':
+            mesh_obj = scene.objects.get(rc_metrics.selected_mesh)
+            if mesh_obj and mesh_obj.type == 'MESH':
+                box.label(text=f"Selected Mesh: {mesh_obj.name}", icon='MESH_DATA')
+            else:
+                box.label(text="Selected mesh not found!", icon='ERROR')
+        else:
+            box.label(text="No mesh selected", icon='ERROR')
+            
         # Render and compare button
         row = box.row()
-        row.operator("rcmetrics.render_compare", icon='RENDER_STILL')
+        if scene.camera and rc_metrics.selected_mesh and rc_metrics.selected_mesh != 'None':
+            row.operator("rcmetrics.render_compare", icon='RENDER_STILL')
+        else:
+            row.label(text="Select both camera and mesh first", icon='INFO')
         
         # Display metrics if they exist
         if rc_metrics.last_psnr > 0 or rc_metrics.last_ssim > 0:

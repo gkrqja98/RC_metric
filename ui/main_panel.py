@@ -26,20 +26,26 @@ class RCMETRICS_PT_Panel(Panel):
         box.prop(rc_metrics, "rc_folder")
         box.operator("rcmetrics.import_rc")
         
-        # Camera rendering and comparison section
+        # Camera & Object Selection section
         layout.separator()
-        layout.label(text="Camera & Mesh Selection", icon='GROUP_VERTEX')
+        layout.label(text="Camera & Object Selection", icon='GROUP_VERTEX')
         
         box = layout.box()
         
         # Camera selector dropdown
         box.prop(rc_metrics, "selected_camera")
         
-        # Mesh selector dropdown
-        box.prop(rc_metrics, "selected_mesh")
+        # Selection type (Mesh or Collection)
+        box.prop(rc_metrics, "selection_type")
         
-        # Option to render only selected mesh
-        box.prop(rc_metrics, "render_selected_mesh_only")
+        # Mesh or Collection selector based on selection type
+        if rc_metrics.selection_type == 'MESH':
+            box.prop(rc_metrics, "selected_mesh")
+        else:  # COLLECTION
+            box.prop(rc_metrics, "selected_collection")
+        
+        # Option to render only selected mesh/collection
+        box.prop(rc_metrics, "render_selected_only")
         
         # Check active camera and guide user
         if not scene.camera:
@@ -61,22 +67,52 @@ class RCMETRICS_PT_Panel(Panel):
             else:
                 box.label(text="No background image assigned", icon='ERROR')
         
-        # Check if selected mesh exists
-        if rc_metrics.selected_mesh and rc_metrics.selected_mesh != 'None':
-            mesh_obj = scene.objects.get(rc_metrics.selected_mesh)
-            if mesh_obj and mesh_obj.type == 'MESH':
-                box.label(text=f"Selected Mesh: {mesh_obj.name}", icon='MESH_DATA')
+        # Check if something valid is selected for rendering
+        valid_selection = False
+        if rc_metrics.selection_type == 'MESH':
+            if rc_metrics.selected_mesh and rc_metrics.selected_mesh != 'None':
+                mesh_obj = scene.objects.get(rc_metrics.selected_mesh)
+                if mesh_obj and mesh_obj.type == 'MESH':
+                    box.label(text=f"Selected Mesh: {mesh_obj.name}", icon='MESH_DATA')
+                    valid_selection = True
+                else:
+                    box.label(text="Selected mesh not found!", icon='ERROR')
             else:
-                box.label(text="Selected mesh not found!", icon='ERROR')
-        else:
-            box.label(text="No mesh selected", icon='ERROR')
+                box.label(text="No mesh selected", icon='ERROR')
+        else:  # COLLECTION
+            if rc_metrics.selected_collection and rc_metrics.selected_collection != 'None':
+                collection = bpy.data.collections.get(rc_metrics.selected_collection)
+                if collection:
+                    box.label(text=f"Selected Collection: {collection.name}", icon='OUTLINER_COLLECTION')
+                    
+                    # Count meshes in collection
+                    mesh_count = 0
+                    for obj in collection.objects:
+                        if obj.type == 'MESH':
+                            mesh_count += 1
+                    
+                    # Also count meshes in child collections
+                    for child_coll in collection.children_recursive:
+                        for obj in child_coll.objects:
+                            if obj.type == 'MESH':
+                                mesh_count += 1
+                    
+                    if mesh_count > 0:
+                        box.label(text=f"Collection contains {mesh_count} meshes", icon='INFO')
+                        valid_selection = True
+                    else:
+                        box.label(text="No meshes in this collection!", icon='ERROR')
+                else:
+                    box.label(text="Selected collection not found!", icon='ERROR')
+            else:
+                box.label(text="No collection selected", icon='ERROR')
             
         # Render and compare button
         row = box.row()
-        if scene.camera and rc_metrics.selected_mesh and rc_metrics.selected_mesh != 'None':
+        if scene.camera and valid_selection:
             row.operator("rcmetrics.render_compare", icon='RENDER_STILL')
         else:
-            row.label(text="Select both camera and mesh first", icon='INFO')
+            row.label(text="Select camera and a valid mesh/collection first", icon='INFO')
         
         # Display metrics if they exist
         if rc_metrics.last_psnr > 0 or rc_metrics.last_ssim > 0:

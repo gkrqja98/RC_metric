@@ -430,18 +430,30 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             if not camera_ok:
                 return {'CANCELLED'}
             
-            # Check if we have a selected mesh
+            # Check if we have a selected mesh or collection
             rc_metrics = context.scene.rc_metrics
-            selected_mesh = rc_metrics.selected_mesh
-            if not selected_mesh or selected_mesh == 'None':
-                self.report({'ERROR'}, "No mesh selected. Please select a mesh first!")
-                return {'CANCELLED'}
+            selection_type = rc_metrics.selection_type
+            selected_mesh = None
+            selected_collection = None
+            
+            if selection_type == 'MESH':
+                selected_mesh = rc_metrics.selected_mesh
+                if not selected_mesh or selected_mesh == 'None':
+                    self.report({'ERROR'}, "No mesh selected. Please select a mesh first!")
+                    return {'CANCELLED'}
+            else:  # COLLECTION
+                selected_collection = rc_metrics.selected_collection
+                if not selected_collection or selected_collection == 'None':
+                    self.report({'ERROR'}, "No collection selected. Please select a collection first!")
+                    return {'CANCELLED'}
             
             # Setup scene for rendering (hide/show objects as needed)
             original_visibilities = self.setup_scene_for_rendering(
                 context, 
-                rc_metrics.render_selected_mesh_only, 
-                selected_mesh
+                rc_metrics.render_selected_only,
+                selection_type,
+                selected_mesh,
+                selected_collection
             )
             
             # Render and get result from file

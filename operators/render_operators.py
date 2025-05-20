@@ -46,9 +46,11 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             original_format = context.scene.render.image_settings.file_format
             original_color_mode = context.scene.render.image_settings.color_mode
             
-            # Create a temporary file path for saving the render
+            # Create a temporary file path for saving the render with a unique timestamp
+            import time
             temp_dir = tempfile.gettempdir()
-            temp_file = os.path.join(temp_dir, "temp_render.png")
+            timestamp = int(time.time())
+            temp_file = os.path.join(temp_dir, f"temp_render_{timestamp}.png")
             
             # Set render to save to the temporary file with RGBA
             context.scene.render.filepath = temp_file
@@ -83,8 +85,18 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             self.report({'INFO'}, f"Successfully loaded render with shape {render_array.shape}")
             
             # Also load the render result into Blender's image system for later use
-            render_img = bpy.data.images.load(temp_file, check_existing=True)
-            render_img.name = "RC_Current_Render"
+            # Check if image already exists and replace it
+            render_img = bpy.data.images.get("RC_Current_Render")
+            if render_img:
+                # Image exists, so replace its data
+                render_img.filepath = temp_file
+                render_img.reload()
+                self.report({'INFO'}, "Updated existing RC_Current_Render image")
+            else:
+                # Create new image
+                render_img = bpy.data.images.load(temp_file, check_existing=False)
+                render_img.name = "RC_Current_Render"
+                self.report({'INFO'}, "Created new RC_Current_Render image")
             
             # Restore original render settings
             context.scene.render.filepath = original_filepath
@@ -179,9 +191,11 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
                 # Increase brightness of difference for better visibility
                 diff_img[:,:,:3] = np.clip(diff_img[:,:,:3] * diff_multiplier, 0, 255).astype(np.uint8)
             
-            # Save difference image to a temporary file
+            # Save difference image to a temporary file with a unique timestamp
+            import time
             temp_dir = tempfile.gettempdir()
-            diff_file = os.path.join(temp_dir, "rc_diff_image.png")
+            timestamp = int(time.time())
+            diff_file = os.path.join(temp_dir, f"rc_diff_image_{timestamp}.png")
             
             # Save the difference image (with proper channel order for OpenCV)
             r, g, b, a = cv2.split(diff_img)
@@ -189,8 +203,18 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             cv2.imwrite(diff_file, diff_bgra)
             
             # Load the difference image into Blender
-            diff_blender_img = bpy.data.images.load(diff_file, check_existing=True)
-            diff_blender_img.name = "RC_Difference"
+            # Check if difference image already exists and replace it
+            diff_blender_img = bpy.data.images.get("RC_Difference")
+            if diff_blender_img:
+                # Image exists, so replace its data
+                diff_blender_img.filepath = diff_file
+                diff_blender_img.reload()
+                self.report({'INFO'}, "Updated existing RC_Difference image")
+            else:
+                # Create new image
+                diff_blender_img = bpy.data.images.load(diff_file, check_existing=False)
+                diff_blender_img.name = "RC_Difference"
+                self.report({'INFO'}, "Created new RC_Difference image")
             
             # Open an image editor and display the difference image
             self.show_image_in_editor(context, diff_blender_img)
@@ -410,6 +434,13 @@ class RCMETRICS_OT_ViewRender(bpy.types.Operator):
             self.report({'ERROR'}, "No render available. Please render first.")
             return {'CANCELLED'}
         
+        # Make sure the image data is up-to-date
+        if render_img.filepath:
+            try:
+                render_img.reload()
+            except:
+                self.report({'WARNING'}, "Could not reload the render image.")
+        
         # Find or create an image editor
         image_editor = None
         for area in context.screen.areas:
@@ -437,6 +468,13 @@ class RCMETRICS_OT_ViewDiff(bpy.types.Operator):
         if not diff_img:
             self.report({'ERROR'}, "No difference image available. Please render first.")
             return {'CANCELLED'}
+        
+        # Make sure the image data is up-to-date
+        if diff_img.filepath:
+            try:
+                diff_img.reload()
+            except:
+                self.report({'WARNING'}, "Could not reload the difference image.")
         
         # Find or create an image editor
         image_editor = None

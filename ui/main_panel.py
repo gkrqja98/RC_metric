@@ -158,7 +158,7 @@ class RCMETRICS_PT_Panel(Panel):
             # Add button to view edge mask if in edge mode
             if rc_metrics.compare_mode == 'EDGES_ONLY' and bpy.data.images.get("RC_Edge_Mask") is not None:
                 row = box.row()
-                row.operator("rcmetrics.view_edge_mask", text="View Edge Mask", icon='MOD_EDGE_SPLIT')
+                row.operator("rcmetrics.view_edge_mask", text="View Edge Mask", icon='MESH_DATA')
             
             # Difference visualization options
             diff_box = layout.box()

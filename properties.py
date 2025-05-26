@@ -3,7 +3,7 @@ Properties for the RC Metrics add-on.
 """
 
 import bpy
-from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty)
+from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty, IntProperty)
 from bpy.types import PropertyGroup
 
 def get_camera_items(self, context):
@@ -123,6 +123,27 @@ class RCMetricsProperties(PropertyGroup):
         default=5.0,
         min=1.0,
         max=20.0
+    )
+    
+    # Compare mode selection
+    compare_mode: EnumProperty(
+        name="Compare Mode",
+        description="Mode for comparing rendered and original images",
+        items=[
+            ('STANDARD', 'Standard', 'Calculate metrics on the entire image'),
+            ('NO_TRANSPARENT', 'Exclude Transparent', 'Exclude transparent areas from calculation'),
+            ('EDGES_ONLY', 'Edges Only', 'Calculate metrics only on edge areas')
+        ],
+        default='NO_TRANSPARENT'
+    )
+    
+    # Edge thickness for edge comparison mode
+    edge_thickness: IntProperty(
+        name="Edge Thickness",
+        description="Thickness of edge area in pixels for edge comparison mode",
+        default=20,
+        min=1,
+        max=100
     )
 
 # Registration function

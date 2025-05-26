@@ -107,12 +107,37 @@ class RCMETRICS_PT_Panel(Panel):
             else:
                 box.label(text="No collection selected", icon='ERROR')
             
-        # Render and compare button
+        # Render button (분리된 기능)
         row = box.row()
         if scene.camera and valid_selection:
-            row.operator("rcmetrics.render_compare", icon='RENDER_STILL')
+            row.operator("rcmetrics.render", icon='RENDER_STILL')
+            row.operator("rcmetrics.render_compare", icon='RENDER_RESULT')
         else:
             row.label(text="Select camera and a valid mesh/collection first", icon='INFO')
+        
+        # Compare section (새로운 섹션)
+        layout.separator()
+        layout.label(text="Image Comparison", icon='IMAGE_BACKGROUND')
+        
+        compare_box = layout.box()
+        
+        # Check if render exists before enabling compare
+        render_exists = bpy.data.images.get("RC_Current_Render") is not None
+        
+        if not render_exists:
+            compare_box.label(text="Render the scene first to enable comparison", icon='ERROR')
+        
+        # Compare mode selector
+        compare_box.prop(rc_metrics, "compare_mode")
+        
+        # Edge thickness for edges-only mode
+        if rc_metrics.compare_mode == 'EDGES_ONLY':
+            compare_box.prop(rc_metrics, "edge_thickness")
+        
+        # Compare button
+        row = compare_box.row()
+        row.enabled = render_exists
+        row.operator("rcmetrics.compare", icon='SHADERFX')
         
         # Display metrics if they exist
         if rc_metrics.last_psnr > 0 or rc_metrics.last_ssim > 0:
@@ -129,6 +154,11 @@ class RCMETRICS_PT_Panel(Panel):
             row = box.row()
             row.operator("rcmetrics.view_render", text="View Render", icon='RENDER_RESULT')
             row.operator("rcmetrics.view_diff", text="View Difference", icon='DRIVER_DISTANCE')
+            
+            # Add button to view edge mask if in edge mode
+            if rc_metrics.compare_mode == 'EDGES_ONLY' and bpy.data.images.get("RC_Edge_Mask") is not None:
+                row = box.row()
+                row.operator("rcmetrics.view_edge_mask", text="View Edge Mask", icon='MOD_EDGE_SPLIT')
             
             # Difference visualization options
             diff_box = layout.box()

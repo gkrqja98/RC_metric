@@ -8,10 +8,10 @@ import numpy as np
 import tempfile
 from bpy_extras.image_utils import load_image
 
-class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
-    """Render the current camera view and compare with the original image"""
-    bl_idname = "rcmetrics.render_compare"
-    bl_label = "Render and Compare"
+class RCMETRICS_OT_Render(bpy.types.Operator):
+    """Render the current camera view"""
+    bl_idname = "rcmetrics.render"
+    bl_label = "Render View"
     bl_options = {'REGISTER', 'UNDO'}
     
     def check_active_camera(self, context):
@@ -102,6 +102,10 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             original_filepath = context.scene.render.filepath
             original_format = context.scene.render.image_settings.file_format
             original_color_mode = context.scene.render.image_settings.color_mode
+            original_film_transparent = context.scene.render.film_transparent  # 투명 설정 저장
+            
+            # 투명 배경 설정 활성화
+            context.scene.render.film_transparent = True
             
             # Create a temporary file path for saving the render with a unique timestamp
             import time
@@ -116,6 +120,7 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             
             # Render the image and save to file
             self.report({'INFO'}, f"Rendering to temporary file: {temp_file}")
+            self.report({'INFO'}, "Transparent background enabled for rendering")
             bpy.ops.render.render(write_still=True)
             
             # Check if file was created
@@ -159,6 +164,7 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             context.scene.render.filepath = original_filepath
             context.scene.render.image_settings.file_format = original_format
             context.scene.render.image_settings.color_mode = original_color_mode
+            context.scene.render.film_transparent = original_film_transparent  # 투명 설정 복원
             
             # We'll keep the temp file for now so we can use it later
             # It will be cleaned up when Blender closes
@@ -170,11 +176,143 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             self.report({'ERROR'}, f"Error rendering view: {str(e)}")
             traceback.print_exc()
             
-            # Restore original render settings
-            context.scene.render.filepath = original_filepath
-            context.scene.render.image_settings.file_format = original_format
+            # Restore original render settings if they were set
+            try:
+                context.scene.render.filepath = original_filepath
+                context.scene.render.image_settings.file_format = original_format
+                context.scene.render.image_settings.color_mode = original_color_mode
+                context.scene.render.film_transparent = original_film_transparent  # 오류 발생해도 투명 설정 복원
+            except:
+                pass
             
             return None, None
+    
+    def show_image_in_editor(self, context, image):
+        """Open and display an image in the Image Editor"""
+        # Find existing Image Editor or create a new one
+        image_editor = None
+        
+        # First check if we already have an image editor open
+        for area in context.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                image_editor = area
+                break
+        
+        # If no image editor is open, try to create one by splitting the current area
+        if not image_editor and len(context.screen.areas) > 1:
+            # Find an area to split (preferably not the 3D view active area)
+            area_to_split = None
+            for area in context.screen.areas:
+                if area.type != 'VIEW_3D' or area != context.area:
+                    area_to_split = area
+                    break
+            
+            # If we found an area to split, try to split it and create an image editor
+            if area_to_split and area_to_split.height > 200:  # Only split if area is large enough
+                # We can't actually split the area here due to context restrictions
+                # Just let the user know they need to open an Image Editor
+                self.report({'INFO'}, "Open an Image Editor to view the rendered image")
+                return
+        
+        # Set the image in the editor if we have one
+        if image_editor:
+            image_editor.spaces.active.image = image
+            self.report({'INFO'}, f"Displaying {image.name} in Image Editor")
+    
+    def execute(self, context):
+        try:
+            # Check if we have active camera with background image
+            camera_ok, bg_image = self.check_active_camera(context)
+            if not camera_ok:
+                return {'CANCELLED'}
+            
+            # Check if we have a selected mesh or collection
+            rc_metrics = context.scene.rc_metrics
+            selection_type = rc_metrics.selection_type
+            selected_mesh = None
+            selected_collection = None
+            
+            if selection_type == 'MESH':
+                selected_mesh = rc_metrics.selected_mesh
+                if not selected_mesh or selected_mesh == 'None':
+                    self.report({'ERROR'}, "No mesh selected. Please select a mesh first!")
+                    return {'CANCELLED'}
+            else:  # COLLECTION
+                selected_collection = rc_metrics.selected_collection
+                if not selected_collection or selected_collection == 'None':
+                    self.report({'ERROR'}, "No collection selected. Please select a collection first!")
+                    return {'CANCELLED'}
+            
+            # Setup scene for rendering (hide/show objects as needed)
+            original_visibilities = self.setup_scene_for_rendering(
+                context, 
+                rc_metrics.render_selected_only,
+                selection_type,
+                selected_mesh,
+                selected_collection
+            )
+            
+            # Render and get result from file
+            self.report({'INFO'}, "Rendering current view...")
+            render_array, render_img = self.render_current_view(context)
+            
+            # Restore original visibility settings
+            self.restore_scene_after_rendering(context, original_visibilities)
+            
+            if render_array is None:
+                self.report({'ERROR'}, "Failed to get render result")
+                return {'CANCELLED'}
+            
+            # Show rendered image in the Image Editor
+            self.show_image_in_editor(context, render_img)
+            
+            # Report success
+            self.report({'INFO'}, "Rendering completed successfully")
+            return {'FINISHED'}
+                
+        except Exception as e:
+            import traceback
+            self.report({'ERROR'}, f"Unexpected error: {str(e)}")
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+class RCMETRICS_OT_Compare(bpy.types.Operator):
+    """Compare rendered image with original image using different modes"""
+    bl_idname = "rcmetrics.compare"
+    bl_label = "Compare Images"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def show_image_in_editor(self, context, image):
+        """Open and display an image in the Image Editor"""
+        # Find existing Image Editor or create a new one
+        image_editor = None
+        
+        # First check if we already have an image editor open
+        for area in context.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                image_editor = area
+                break
+        
+        # If no image editor is open, try to create one by splitting the current area
+        if not image_editor and len(context.screen.areas) > 1:
+            # Find an area to split (preferably not the 3D view active area)
+            area_to_split = None
+            for area in context.screen.areas:
+                if area.type != 'VIEW_3D' or area != context.area:
+                    area_to_split = area
+                    break
+            
+            # If we found an area to split, try to split it and create an image editor
+            if area_to_split and area_to_split.height > 200:  # Only split if area is large enough
+                # We can't actually split the area here due to context restrictions
+                # Just let the user know they need to open an Image Editor
+                self.report({'INFO'}, "Open an Image Editor to view the difference image")
+                return
+        
+        # Set the image in the editor if we have one
+        if image_editor:
+            image_editor.spaces.active.image = image
+            self.report({'INFO'}, f"Displaying {image.name} in Image Editor")
     
     def create_diff_image(self, render_array, original_img, context):
         """Create a difference image between rendered and original images"""
@@ -283,96 +421,66 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             traceback.print_exc()
             return None
     
-    def show_image_in_editor(self, context, image):
-        """Open and display an image in the Image Editor"""
-        # Find existing Image Editor or create a new one
-        image_editor = None
-        
-        # First check if we already have an image editor open
-        for area in context.screen.areas:
-            if area.type == 'IMAGE_EDITOR':
-                image_editor = area
-                break
-        
-        # If no image editor is open, try to create one by splitting the current area
-        if not image_editor and len(context.screen.areas) > 1:
-            # Find an area to split (preferably not the 3D view active area)
-            area_to_split = None
-            for area in context.screen.areas:
-                if area.type != 'VIEW_3D' or area != context.area:
-                    area_to_split = area
-                    break
-            
-            # If we found an area to split, try to split it and create an image editor
-            if area_to_split and area_to_split.height > 200:  # Only split if area is large enough
-                # We can't actually split the area here due to context restrictions
-                # Just let the user know they need to open an Image Editor
-                self.report({'INFO'}, "Open an Image Editor to view the difference image")
-                return
-        
-        # Set the image in the editor if we have one
-        if image_editor:
-            image_editor.spaces.active.image = image
-            self.report({'INFO'}, f"Displaying {image.name} in Image Editor")
-
-    def calculate_metrics(self, render_array, original_image):
-        """Calculate PSNR and SSIM between rendered image and original image, ignoring transparent areas"""
+    def calculate_metrics_standard(self, render_array, original_img):
+        """Standard metrics calculation on entire image"""
         try:
             # Import necessary modules
             import cv2
             from skimage.metrics import structural_similarity as ssim
             from skimage.metrics import peak_signal_noise_ratio as psnr
             
-            # Ensure render array is valid
-            if render_array is None or render_array.size == 0:
-                self.report({'ERROR'}, "Render array is empty or None")
-                return None, None
-                
-            # Get original image path
-            original_path = bpy.path.abspath(original_image.filepath)
-            self.report({'INFO'}, f"Original image path: {original_path}")
+            # Convert to the same format for comparison
+            render_comp = render_array[:,:,:3] if render_array.shape[2] >= 3 else render_array
+            original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
             
-            if not os.path.exists(original_path):
-                self.report({'ERROR'}, f"Original image not found: {original_path}")
-                return None, None
-                
-            # Load original image using OpenCV with alpha if possible
-            original_img = cv2.imread(original_path, cv2.IMREAD_UNCHANGED)
+            # Convert to grayscale for SSIM calculation
+            original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
+            rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
             
-            if original_img is None:
-                self.report({'ERROR'}, f"Failed to load original image: {original_path}")
-                return None, None
-                
-            # Log image dimensions
-            self.report({'INFO'}, f"Original image shape: {original_img.shape}")
-            self.report({'INFO'}, f"Rendered image shape: {render_array.shape}")
+            # Calculate metrics on the whole image
+            psnr_value = psnr(original_comp, render_comp)
+            ssim_value = ssim(original_gray, rendered_gray, data_range=255, gaussian_weights=True, use_sample_covariance=False)
             
-            # Resize original image if dimensions don't match
-            if original_img.shape[:2] != render_array.shape[:2]:
-                self.report({'INFO'}, f"Resizing original image from {original_img.shape[:2]} to {render_array.shape[:2]}")
-                if original_img.shape[2] == 4:  # With alpha
-                    original_img = cv2.resize(original_img, (render_array.shape[1], render_array.shape[0]), 
-                                            interpolation=cv2.INTER_AREA)
-                else:  # No alpha
-                    original_img = cv2.resize(original_img, (render_array.shape[1], render_array.shape[0]), 
-                                            interpolation=cv2.INTER_AREA)
-                    # If original doesn't have alpha but render does, add an alpha channel
-                    if render_array.shape[2] == 4 and original_img.shape[2] == 3:
-                        alpha_channel = np.ones((original_img.shape[0], original_img.shape[1]), dtype=np.uint8) * 255
-                        original_img = cv2.merge([original_img[:,:,0], original_img[:,:,1], 
-                                                 original_img[:,:,2], alpha_channel])
+            self.report({'INFO'}, f"Standard metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
             
-            # Create a mask for non-transparent pixels (if alpha channel exists)
+            return psnr_value, ssim_value
+            
+        except Exception as e:
+            import traceback
+            self.report({'ERROR'}, f"Error calculating standard metrics: {str(e)}")
+            traceback.print_exc()
+            return None, None
+    
+    def calculate_metrics_no_transparent(self, render_array, original_img):
+        """Calculate metrics excluding transparent areas"""
+        try:
+            # Import necessary modules
+            import cv2
+            import numpy as np
+            from skimage.metrics import structural_similarity as ssim
+            from skimage.metrics import peak_signal_noise_ratio as psnr
+            
+            # Create mask for non-transparent pixels
             mask = None
             if render_array.shape[2] == 4:
                 # Create mask where alpha > 0 (non-transparent pixels)
                 mask = render_array[:,:,3] > 0
+                
+                # Print statistics about the transparency mask
+                total_pixels = mask.size
+                opaque_pixels = np.count_nonzero(mask)
+                transparent_pixels = total_pixels - opaque_pixels
+                transparent_ratio = transparent_pixels / total_pixels * 100
+                
+                self.report({'INFO'}, f"투명 픽셀: {transparent_pixels}/{total_pixels} ({transparent_ratio:.2f}%)")
+                self.report({'INFO'}, f"불투명 픽셀: {opaque_pixels}/{total_pixels} ({100-transparent_ratio:.2f}%)")
                 
                 # Convert to BGR(A) for comparison (OpenCV uses BGR)
                 render_comp = render_array[:,:,:3]  # Just use RGB channels for comparison
                 original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
             else:
                 # No alpha channel, use all pixels
+                mask = np.ones(render_array.shape[:2], dtype=bool)
                 render_comp = render_array
                 original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
             
@@ -380,95 +488,205 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
             original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
             rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
             
-            # Calculate metrics with mask if available
-            if mask is not None:
-                # Count non-transparent pixels
-                valid_pixel_count = np.count_nonzero(mask)
-                if valid_pixel_count == 0:
-                    self.report({'WARNING'}, "No valid (non-transparent) pixels to compare")
-                    return 0, 0
-                
-                # Calculate PSNR only on non-transparent pixels
-                # For PSNR, mask the images first
-                render_masked = np.zeros_like(render_comp)
-                original_masked = np.zeros_like(original_comp)
-                
-                for c in range(render_comp.shape[2] if len(render_comp.shape) == 3 else 1):
-                    render_masked[:,:,c] = np.where(mask, render_comp[:,:,c], 0)
-                    original_masked[:,:,c] = np.where(mask, original_comp[:,:,c], 0)
-                
-                # MSE calculation manually on masked area
-                squared_diff = np.sum((render_masked.astype(np.float32) - original_masked.astype(np.float32))**2)
-                mse = squared_diff / valid_pixel_count / render_comp.shape[2] if len(render_comp.shape) == 3 else 1
-                psnr_value = 10 * np.log10((255**2) / mse) if mse > 0 else 100  # 100 is used when MSE is 0 (perfect match)
-                
-                # For SSIM, use the scikit-image function with the mask
-                rendered_gray_masked = np.where(mask, rendered_gray, 0)
-                original_gray_masked = np.where(mask, original_gray, 0)
-                ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
-                                data_range=255, gaussian_weights=True, 
-                                use_sample_covariance=False)
-            else:
-                # Calculate metrics on the whole image
-                psnr_value = psnr(original_comp, render_comp)
-                ssim_value = ssim(original_gray, rendered_gray)
+            # Count non-transparent pixels
+            valid_pixel_count = np.count_nonzero(mask)
+            if valid_pixel_count == 0:
+                self.report({'WARNING'}, "No valid (non-transparent) pixels to compare")
+                return 0, 0
             
-            self.report({'INFO'}, f"Calculated metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
+            # Calculate PSNR only on non-transparent pixels
+            # For PSNR, mask the images first
+            render_masked = np.zeros_like(render_comp)
+            original_masked = np.zeros_like(original_comp)
+            
+            for c in range(render_comp.shape[2] if len(render_comp.shape) == 3 else 1):
+                render_masked[:,:,c] = np.where(mask, render_comp[:,:,c], 0)
+                original_masked[:,:,c] = np.where(mask, original_comp[:,:,c], 0)
+            
+            # MSE calculation manually on masked area
+            squared_diff = np.sum((render_masked.astype(np.float32) - original_masked.astype(np.float32))**2)
+            mse = squared_diff / valid_pixel_count / (render_comp.shape[2] if len(render_comp.shape) == 3 else 1)
+            psnr_value = 10 * np.log10((255**2) / mse) if mse > 0 else 100  # 100 is used when MSE is 0 (perfect match)
+            
+            # For SSIM, use the scikit-image function with the mask
+            rendered_gray_masked = np.where(mask, rendered_gray, 0)
+            original_gray_masked = np.where(mask, original_gray, 0)
+            ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
+                            data_range=255, gaussian_weights=True, 
+                            use_sample_covariance=False)
+            
+            self.report({'INFO'}, f"No-transparent metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
             
             return psnr_value, ssim_value
             
         except Exception as e:
             import traceback
-            self.report({'ERROR'}, f"Error calculating metrics: {str(e)}")
+            self.report({'ERROR'}, f"Error calculating no-transparent metrics: {str(e)}")
+            traceback.print_exc()
+            return None, None
+    
+    def calculate_metrics_edges_only(self, render_array, original_img, edge_thickness=20):
+        """Calculate metrics only on edge areas"""
+        try:
+            # Import necessary modules
+            import cv2
+            import numpy as np
+            from skimage.metrics import structural_similarity as ssim
+            from skimage.metrics import peak_signal_noise_ratio as psnr
+            
+            # Get image dimensions
+            height, width = render_array.shape[:2]
+            
+            # Create edge mask (pixels within edge_thickness of the border)
+            edge_mask = np.zeros((height, width), dtype=bool)
+            
+            # Set outer edge_thickness pixels to True
+            edge_mask[:edge_thickness, :] = True  # Top edge
+            edge_mask[-edge_thickness:, :] = True  # Bottom edge
+            edge_mask[:, :edge_thickness] = True  # Left edge
+            edge_mask[:, -edge_thickness:] = True  # Right edge
+            
+            # If we have alpha channel, combine with transparency mask
+            alpha_mask = None
+            if render_array.shape[2] == 4:
+                # Only include edge pixels that are also non-transparent
+                alpha_mask = render_array[:,:,3] > 0
+                
+                # Print statistics about the transparency mask
+                total_pixels = alpha_mask.size
+                opaque_pixels = np.count_nonzero(alpha_mask)
+                transparent_pixels = total_pixels - opaque_pixels
+                transparent_ratio = transparent_pixels / total_pixels * 100
+                
+                self.report({'INFO'}, f"투명 픽셀: {transparent_pixels}/{total_pixels} ({transparent_ratio:.2f}%)")
+                self.report({'INFO'}, f"불투명 픽셀: {opaque_pixels}/{total_pixels} ({100-transparent_ratio:.2f}%)")
+                
+                # Combine masks - only use edge pixels that are not transparent
+                combined_mask = np.logical_and(edge_mask, alpha_mask)
+                
+                # 만약 결합된 마스크에 유효한 픽셀이 없다면 알파 마스크만 사용
+                if np.count_nonzero(combined_mask) == 0:
+                    self.report({'WARNING'}, "알파와 결합된 가장자리 마스크에 유효한 픽셀이 없습니다. 전체 불투명 영역을 사용합니다.")
+                    edge_mask = alpha_mask.copy()
+                else:
+                    edge_mask = combined_mask
+            
+            # Prepare images for comparison
+            render_comp = render_array[:,:,:3]  # Just use RGB channels
+            original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
+            
+            # Convert to grayscale for SSIM
+            original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
+            rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
+            
+            # Count valid edge pixels
+            valid_pixel_count = np.count_nonzero(edge_mask)
+            if valid_pixel_count == 0:
+                self.report({'WARNING'}, "No valid edge pixels to compare")
+                return 0, 0
+            
+            # 유효한 마스크 픽셀 비율 출력
+            mask_ratio = valid_pixel_count / (height * width) * 100
+            self.report({'INFO'}, f"마스크 적용 픽셀 비율: {mask_ratio:.2f}% ({valid_pixel_count} / {height * width})")
+            
+            # Mask images for edge-only comparison
+            render_masked = np.zeros_like(render_comp)
+            original_masked = np.zeros_like(original_comp)
+            
+            for c in range(3):  # RGB channels
+                render_masked[:,:,c] = np.where(edge_mask, render_comp[:,:,c], 0)
+                original_masked[:,:,c] = np.where(edge_mask, original_comp[:,:,c], 0)
+            
+            # Calculate MSE manually for PSNR
+            squared_diff = np.sum((render_masked.astype(np.float32) - original_masked.astype(np.float32))**2)
+            mse = squared_diff / valid_pixel_count / 3  # Divide by valid pixels and channel count
+            psnr_value = 10 * np.log10((255**2) / mse) if mse > 0 else 100
+            
+            # Calculate SSIM on edge areas
+            rendered_gray_masked = np.where(edge_mask, rendered_gray, 0)
+            original_gray_masked = np.where(edge_mask, original_gray, 0)
+            ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
+                            data_range=255, gaussian_weights=True, 
+                            use_sample_covariance=False)
+            
+            self.report({'INFO'}, f"Edge-only metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
+            
+            # Create visualization of edge mask for debugging
+            # This helps to see which pixels were used in the comparison
+            edge_vis = np.zeros((height, width, 4), dtype=np.uint8)
+            edge_vis[edge_mask, 0] = 255  # Red channel for edge pixels
+            edge_vis[edge_mask, 3] = 200  # Alpha for edge pixels
+            
+            # 가장자리 마스크 시각화 저장
+            temp_dir = tempfile.gettempdir()
+            import time
+            timestamp = int(time.time())
+            edge_file = os.path.join(temp_dir, f"rc_edge_mask_{timestamp}.png")
+            cv2.imwrite(edge_file, cv2.cvtColor(edge_vis, cv2.COLOR_RGBA2BGRA))
+            
+            # 블렌더에 마스크 이미지 로드
+            edge_img = bpy.data.images.get("RC_Edge_Mask")
+            if edge_img:
+                edge_img.filepath = edge_file
+                edge_img.reload()
+                self.report({'INFO'}, "업데이트된 가장자리 마스크 이미지")
+            else:
+                edge_img = bpy.data.images.load(edge_file, check_existing=False)
+                edge_img.name = "RC_Edge_Mask"
+                self.report({'INFO'}, "생성된 가장자리 마스크 이미지")
+            
+            return psnr_value, ssim_value
+            
+        except Exception as e:
+            import traceback
+            self.report({'ERROR'}, f"Error calculating edge-only metrics: {str(e)}")
             traceback.print_exc()
             return None, None
     
     def execute(self, context):
         try:
-            # Check if we have active camera with background image
-            camera_ok, bg_image = self.check_active_camera(context)
-            if not camera_ok:
+            # 렌더링된 이미지 확인
+            render_img = bpy.data.images.get("RC_Current_Render")
+            if not render_img:
+                self.report({'ERROR'}, "No render available. Please render first.")
                 return {'CANCELLED'}
             
-            # Check if we have a selected mesh or collection
-            rc_metrics = context.scene.rc_metrics
-            selection_type = rc_metrics.selection_type
-            selected_mesh = None
-            selected_collection = None
-            
-            if selection_type == 'MESH':
-                selected_mesh = rc_metrics.selected_mesh
-                if not selected_mesh or selected_mesh == 'None':
-                    self.report({'ERROR'}, "No mesh selected. Please select a mesh first!")
-                    return {'CANCELLED'}
-            else:  # COLLECTION
-                selected_collection = rc_metrics.selected_collection
-                if not selected_collection or selected_collection == 'None':
-                    self.report({'ERROR'}, "No collection selected. Please select a collection first!")
-                    return {'CANCELLED'}
-            
-            # Setup scene for rendering (hide/show objects as needed)
-            original_visibilities = self.setup_scene_for_rendering(
-                context, 
-                rc_metrics.render_selected_only,
-                selection_type,
-                selected_mesh,
-                selected_collection
-            )
-            
-            # Render and get result from file
-            self.report({'INFO'}, "Rendering current view...")
-            render_array, render_img = self.render_current_view(context)
-            
-            # Restore original visibility settings
-            self.restore_scene_after_rendering(context, original_visibilities)
+            # 렌더링된 이미지 데이터 가져오기
+            render_path = bpy.path.abspath(render_img.filepath)
+            import cv2
+            import numpy as np
+            render_array = cv2.imread(render_path, cv2.IMREAD_UNCHANGED)
             
             if render_array is None:
-                self.report({'ERROR'}, "Failed to get render result")
+                self.report({'ERROR'}, f"Failed to read render image: {render_path}")
+                return {'CANCELLED'}
+                
+            # OpenCV는 BGRA, 우리는 RGBA가 필요
+            if render_array.shape[2] == 4:
+                b, g, r, a = cv2.split(render_array)
+                render_array = cv2.merge([r, g, b, a])
+            else:
+                render_array = cv2.cvtColor(render_array, cv2.COLOR_BGR2RGB)
+            
+            # 활성 카메라의 배경 이미지 가져오기
+            if not context.scene.camera:
+                self.report({'ERROR'}, "No active camera selected.")
+                return {'CANCELLED'}
+                
+            cam_data = context.scene.camera.data
+            bg_image = None
+            
+            if hasattr(cam_data, 'background_images') and cam_data.background_images:
+                for bg in cam_data.background_images:
+                    if bg.image:
+                        bg_image = bg.image
+                        break
+            
+            if not bg_image:
+                self.report({'ERROR'}, "Active camera does not have a background image.")
                 return {'CANCELLED'}
             
-            # Load original image with OpenCV for processing
-            import cv2
+            # 원본 이미지 로드
             original_path = bpy.path.abspath(bg_image.filepath)
             original_img = cv2.imread(original_path, cv2.IMREAD_UNCHANGED)
             
@@ -476,28 +694,36 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
                 self.report({'ERROR'}, f"Failed to load original image: {original_path}")
                 return {'CANCELLED'}
                 
-            # Resize original image if dimensions don't match
+            # 크기가 다르면 원본 이미지 리사이즈
             if original_img.shape[:2] != render_array.shape[:2]:
-                original_img = cv2.resize(original_img, (render_array.shape[1], render_array.shape[0]))
+                original_img = cv2.resize(original_img, (render_array.shape[1], render_array.shape[0]),
+                                       interpolation=cv2.INTER_AREA)
             
-            # Create and display the difference image
-            self.report({'INFO'}, "Creating difference image...")
-            diff_img = self.create_diff_image(render_array, original_img, context)
+            # 선택된 비교 모드에 따라 메트릭 계산
+            rc_metrics = context.scene.rc_metrics
+            compare_mode = rc_metrics.compare_mode
             
-            # Calculate metrics
-            self.report({'INFO'}, "Comparing rendered image with original...")
-            psnr_value, ssim_value = self.calculate_metrics(render_array, bg_image)
+            if compare_mode == 'STANDARD':
+                psnr_value, ssim_value = self.calculate_metrics_standard(render_array, original_img)
+            elif compare_mode == 'NO_TRANSPARENT':
+                psnr_value, ssim_value = self.calculate_metrics_no_transparent(render_array, original_img)
+            elif compare_mode == 'EDGES_ONLY':
+                psnr_value, ssim_value = self.calculate_metrics_edges_only(
+                    render_array, original_img, rc_metrics.edge_thickness)
             
+            # 결과가 유효하면 저장 및 디스플레이
             if psnr_value is not None and ssim_value is not None:
-                # Store results in scene properties
                 context.scene.rc_metrics.last_psnr = psnr_value
                 context.scene.rc_metrics.last_ssim = ssim_value
                 
-                # Report success
-                self.report({'INFO'}, f"Image comparison complete - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
+                # 차이 이미지 생성
+                diff_img = self.create_diff_image(render_array, original_img, context)
                 
-                # Inform user about the difference image
-                self.report({'INFO'}, "Difference image created. Open an Image Editor to view it.")
+                # 차이 이미지 표시
+                if diff_img:
+                    self.show_image_in_editor(context, diff_img)
+                
+                self.report({'INFO'}, f"Image comparison complete - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
                 return {'FINISHED'}
             else:
                 self.report({'ERROR'}, "Failed to calculate image metrics")
@@ -553,7 +779,7 @@ class RCMETRICS_OT_ViewDiff(bpy.types.Operator):
         # Check if we have a difference image
         diff_img = bpy.data.images.get("RC_Difference")
         if not diff_img:
-            self.report({'ERROR'}, "No difference image available. Please render first.")
+            self.report({'ERROR'}, "No difference image available. Please compare first.")
             return {'CANCELLED'}
         
         # Make sure the image data is up-to-date
@@ -579,13 +805,70 @@ class RCMETRICS_OT_ViewDiff(bpy.types.Operator):
         
         return {'FINISHED'}
 
+class RCMETRICS_OT_ViewEdgeMask(bpy.types.Operator):
+    """View the edge mask used for edge-only comparison"""
+    bl_idname = "rcmetrics.view_edge_mask"
+    bl_label = "View Edge Mask"
+    
+    def execute(self, context):
+        # Check if we have an edge mask image
+        edge_img = bpy.data.images.get("RC_Edge_Mask")
+        if not edge_img:
+            self.report({'ERROR'}, "No edge mask available. Please run edge comparison first.")
+            return {'CANCELLED'}
+        
+        # Make sure the image data is up-to-date
+        if edge_img.filepath:
+            try:
+                edge_img.reload()
+            except:
+                self.report({'WARNING'}, "Could not reload the edge mask image.")
+        
+        # Find or create an image editor
+        image_editor = None
+        for area in context.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                image_editor = area
+                break
+        
+        if not image_editor:
+            self.report({'INFO'}, "Please open an Image Editor to view the edge mask.")
+        else:
+            # Set the image in the editor
+            image_editor.spaces.active.image = edge_img
+            self.report({'INFO'}, "Displaying edge mask in Image Editor")
+        
+        return {'FINISHED'}
+
+# Legacy operator that calls both render and compare
+class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
+    """Render the current camera view and compare with the original image (legacy)"""
+    bl_idname = "rcmetrics.render_compare"
+    bl_label = "Render and Compare"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        # First call the render operator
+        bpy.ops.rcmetrics.render()
+        
+        # Then call the compare operator
+        bpy.ops.rcmetrics.compare()
+        
+        return {'FINISHED'}
+
 # Registration
 def register():
-    bpy.utils.register_class(RCMETRICS_OT_RenderCompare)
+    bpy.utils.register_class(RCMETRICS_OT_Render)
+    bpy.utils.register_class(RCMETRICS_OT_Compare)
     bpy.utils.register_class(RCMETRICS_OT_ViewRender)
     bpy.utils.register_class(RCMETRICS_OT_ViewDiff)
+    bpy.utils.register_class(RCMETRICS_OT_ViewEdgeMask)
+    bpy.utils.register_class(RCMETRICS_OT_RenderCompare)
 
 def unregister():
+    bpy.utils.unregister_class(RCMETRICS_OT_RenderCompare)
+    bpy.utils.unregister_class(RCMETRICS_OT_ViewEdgeMask)
     bpy.utils.unregister_class(RCMETRICS_OT_ViewDiff)
     bpy.utils.unregister_class(RCMETRICS_OT_ViewRender)
-    bpy.utils.unregister_class(RCMETRICS_OT_RenderCompare)
+    bpy.utils.unregister_class(RCMETRICS_OT_Compare)
+    bpy.utils.unregister_class(RCMETRICS_OT_Render)

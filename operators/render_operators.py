@@ -458,62 +458,77 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
             import cv2
             import numpy as np
             from skimage.metrics import structural_similarity as ssim
-            from skimage.metrics import peak_signal_noise_ratio as psnr
             
             # Create mask for non-transparent pixels
-            mask = None
             if render_array.shape[2] == 4:
-                # Create mask where alpha > 0 (non-transparent pixels)
-                mask = render_array[:,:,3] > 0
+                # 알파 채널을 분리합니다.
+                alpha = render_array[:,:,3]  # 첫 번째 이미지의 알파 채널
+                alpha_mask = alpha > 0  # 투명하지 않은 부분만 비교하도록 마스크 생성
                 
                 # Print statistics about the transparency mask
-                total_pixels = mask.size
-                opaque_pixels = np.count_nonzero(mask)
+                total_pixels = alpha_mask.size
+                opaque_pixels = np.count_nonzero(alpha_mask)
                 transparent_pixels = total_pixels - opaque_pixels
                 transparent_ratio = transparent_pixels / total_pixels * 100
                 
                 self.report({'INFO'}, f"투명 픽셀: {transparent_pixels}/{total_pixels} ({transparent_ratio:.2f}%)")
                 self.report({'INFO'}, f"불투명 픽셀: {opaque_pixels}/{total_pixels} ({100-transparent_ratio:.2f}%)")
                 
-                # Convert to BGR(A) for comparison (OpenCV uses BGR)
-                render_comp = render_array[:,:,:3]  # Just use RGB channels for comparison
-                original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
+                # 투명한 부분을 제외한 두 이미지를 비교합니다.
+                image1_rgb = render_array[:,:,:3]  # 알파 채널을 제외한 RGB 부분만 사용
+                image2_rgb = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img  # 두 번째 이미지에서 RGB만 사용
+                
+                # Count non-transparent pixels
+                valid_pixel_count = np.count_nonzero(alpha_mask)
+                if valid_pixel_count == 0:
+                    self.report({'WARNING'}, "No valid (non-transparent) pixels to compare")
+                    return 0, 0
+                
+                # 투명한 부분을 제외한 MSE 계산
+                # Use the requested calculation method
+                mse = np.mean((image1_rgb[alpha_mask] - image2_rgb[alpha_mask]) ** 2)
+                
+                # PSNR 계산
+                if mse == 0:
+                    psnr_value = float('inf')
+                else:
+                    pixel_max = 255.0
+                    psnr_value = 20 * np.log10(pixel_max / np.sqrt(mse))
             else:
                 # No alpha channel, use all pixels
                 mask = np.ones(render_array.shape[:2], dtype=bool)
-                render_comp = render_array
-                original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
+                image1_rgb = render_array
+                image2_rgb = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
+                
+                # Calculate MSE and PSNR for non-alpha images
+                mse = np.mean((image1_rgb - image2_rgb) ** 2)
+                if mse == 0:
+                    psnr_value = float('inf')
+                else:
+                    pixel_max = 255.0
+                    psnr_value = 20 * np.log10(pixel_max / np.sqrt(mse))
             
+            # SSIM 계산
             # Convert to grayscale for SSIM calculation
-            original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
-            rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
+            original_gray = cv2.cvtColor(image2_rgb, cv2.COLOR_BGR2GRAY) if len(image2_rgb.shape) == 3 else image2_rgb
+            rendered_gray = cv2.cvtColor(image1_rgb, cv2.COLOR_RGB2GRAY) if len(image1_rgb.shape) == 3 else image1_rgb
             
-            # Count non-transparent pixels
-            valid_pixel_count = np.count_nonzero(mask)
-            if valid_pixel_count == 0:
-                self.report({'WARNING'}, "No valid (non-transparent) pixels to compare")
-                return 0, 0
-            
-            # Calculate PSNR only on non-transparent pixels
-            # For PSNR, mask the images first
-            render_masked = np.zeros_like(render_comp)
-            original_masked = np.zeros_like(original_comp)
-            
-            for c in range(render_comp.shape[2] if len(render_comp.shape) == 3 else 1):
-                render_masked[:,:,c] = np.where(mask, render_comp[:,:,c], 0)
-                original_masked[:,:,c] = np.where(mask, original_comp[:,:,c], 0)
-            
-            # MSE calculation manually on masked area
-            squared_diff = np.sum((render_masked.astype(np.float32) - original_masked.astype(np.float32))**2)
-            mse = squared_diff / valid_pixel_count / (render_comp.shape[2] if len(render_comp.shape) == 3 else 1)
-            psnr_value = 10 * np.log10((255**2) / mse) if mse > 0 else 100  # 100 is used when MSE is 0 (perfect match)
-            
-            # For SSIM, use the scikit-image function with the mask
-            rendered_gray_masked = np.where(mask, rendered_gray, 0)
-            original_gray_masked = np.where(mask, original_gray, 0)
-            ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
-                            data_range=255, gaussian_weights=True, 
-                            use_sample_covariance=False)
+            if render_array.shape[2] == 4:
+                # 렌더링 이미지의 투명한 부분을 마스크로 사용
+                # 두 이미지 모두 투명한 부분을 동일하게 마스킹
+                # 마스킹된 이미지로 SSIM 계산
+                rendered_gray_masked = np.where(alpha_mask, rendered_gray, 0)
+                original_gray_masked = np.where(alpha_mask, original_gray, 0)
+                
+                # 투명한 부분을 제외한 그레이스케일 이미지로 SSIM 계산
+                ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
+                                data_range=255, gaussian_weights=True, 
+                                use_sample_covariance=False)
+            else:
+                # 알파 채널이 없는 경우 전체 이미지에 대해 SSIM 계산
+                ssim_value = ssim(rendered_gray, original_gray, 
+                                data_range=255, gaussian_weights=True, 
+                                use_sample_covariance=False)
             
             self.report({'INFO'}, f"No-transparent metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
             

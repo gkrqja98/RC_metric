@@ -3,7 +3,7 @@ Properties for the RC Metrics add-on.
 """
 
 import bpy
-from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty, IntProperty)
+from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty, IntProperty, FloatVectorProperty)
 from bpy.types import PropertyGroup
 
 def get_camera_items(self, context):
@@ -144,6 +144,30 @@ class RCMetricsProperties(PropertyGroup):
         default=20,
         min=1,
         max=100
+    )
+
+    # SSIM mode selection
+    ssim_mode: EnumProperty(
+        name="SSIM Mode",
+        description="Choose SSIM calculation method",
+        items=[
+            ('GRAY', 'Gray', 'Grayscale SSIM'),
+            ('COLOR', 'Color', 'Color SSIM (RGB 평균)'),
+            ('WEIGHTED', 'Weighted', 'Weighted SSIM (RGB 가중 평균)')
+        ],
+        default='GRAY'
+    )
+
+    # SSIM channel weights (for weighted mode)
+    ssim_weights: FloatVectorProperty(
+        name="SSIM Weights",
+        description="Weights for R, G, B channels (used in Weighted SSIM)",
+        default=(0.333, 0.333, 0.334),
+        min=0.0,
+        max=1.0,
+        size=3,
+        subtype='COLOR',
+        step=0.01
     )
 
 # Registration function

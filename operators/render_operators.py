@@ -421,6 +421,20 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
             traceback.print_exc()
             return None
     
+    def ssim_color(self, img1, img2):
+        from skimage.metrics import structural_similarity as ssim
+        ssim_r = ssim(img1[:,:,0], img2[:,:,0], data_range=255)
+        ssim_g = ssim(img1[:,:,1], img2[:,:,1], data_range=255)
+        ssim_b = ssim(img1[:,:,2], img2[:,:,2], data_range=255)
+        return (ssim_r + ssim_g + ssim_b) / 3
+
+    def ssim_weighted(self, img1, img2, weights):
+        from skimage.metrics import structural_similarity as ssim
+        ssim_r = ssim(img1[:,:,0], img2[:,:,0], data_range=255)
+        ssim_g = ssim(img1[:,:,1], img2[:,:,1], data_range=255)
+        ssim_b = ssim(img1[:,:,2], img2[:,:,2], data_range=255)
+        return ssim_r * weights[0] + ssim_g * weights[1] + ssim_b * weights[2]
+
     def calculate_metrics_standard(self, render_array, original_img):
         """Standard metrics calculation on entire image"""
         try:
@@ -433,15 +447,31 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
             render_comp = render_array[:,:,:3] if render_array.shape[2] >= 3 else render_array
             original_comp = original_img[:,:,:3] if original_img.shape[2] >= 3 else original_img
             
-            # Convert to grayscale for SSIM calculation
-            original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
-            rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
+            # SSIM mode 분기
+            scene = bpy.context.scene
+            rc_metrics = scene.rc_metrics if hasattr(scene, 'rc_metrics') else None
+            ssim_mode = rc_metrics.ssim_mode if rc_metrics else 'GRAY'
+            ssim_weights = rc_metrics.ssim_weights if rc_metrics else (0.333, 0.333, 0.334)
             
             # Calculate metrics on the whole image
             psnr_value = psnr(original_comp, render_comp)
-            ssim_value = ssim(original_gray, rendered_gray, data_range=255, gaussian_weights=True, use_sample_covariance=False)
             
-            self.report({'INFO'}, f"Standard metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
+            if ssim_mode == 'GRAY':
+                # Convert to grayscale for SSIM calculation
+                original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
+                rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
+                ssim_value = ssim(original_gray, rendered_gray, data_range=255, gaussian_weights=True, use_sample_covariance=False)
+            elif ssim_mode == 'COLOR':
+                ssim_value = self.ssim_color(original_comp, render_comp)
+            elif ssim_mode == 'WEIGHTED':
+                ssim_value = self.ssim_weighted(original_comp, render_comp, ssim_weights)
+            else:
+                # fallback
+                original_gray = cv2.cvtColor(original_comp, cv2.COLOR_BGR2GRAY) if len(original_comp.shape) == 3 else original_comp
+                rendered_gray = cv2.cvtColor(render_comp, cv2.COLOR_RGB2GRAY) if len(render_comp.shape) == 3 else render_comp
+                ssim_value = ssim(original_gray, rendered_gray, data_range=255, gaussian_weights=True, use_sample_covariance=False)
+            
+            self.report({'INFO'}, f"Standard metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f} (mode: {ssim_mode})")
             
             return psnr_value, ssim_value
             
@@ -451,13 +481,17 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
             traceback.print_exc()
             return None, None
     
-    def calculate_metrics_no_transparent(self, render_array, original_img):
+    def calculate_metrics_no_transparent(self, render_array, original_img, context):
         """Calculate metrics excluding transparent areas"""
         try:
             # Import necessary modules
             import cv2
             import numpy as np
             from skimage.metrics import structural_similarity as ssim
+            
+            rc_metrics = context.scene.rc_metrics if hasattr(context.scene, 'rc_metrics') else None
+            ssim_mode = rc_metrics.ssim_mode if rc_metrics else 'GRAY'
+            ssim_weights = rc_metrics.ssim_weights if rc_metrics else (0.333, 0.333, 0.334)
             
             # Create mask for non-transparent pixels
             if render_array.shape[2] == 4:
@@ -509,26 +543,28 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
                     psnr_value = 20 * np.log10(pixel_max / np.sqrt(mse))
             
             # SSIM 계산
-            # Convert to grayscale for SSIM calculation
-            original_gray = cv2.cvtColor(image2_rgb, cv2.COLOR_BGR2GRAY) if len(image2_rgb.shape) == 3 else image2_rgb
-            rendered_gray = cv2.cvtColor(image1_rgb, cv2.COLOR_RGB2GRAY) if len(image1_rgb.shape) == 3 else image1_rgb
-            
-            if render_array.shape[2] == 4:
-                # 렌더링 이미지의 투명한 부분을 마스크로 사용
-                # 두 이미지 모두 투명한 부분을 동일하게 마스킹
-                # 마스킹된 이미지로 SSIM 계산
-                rendered_gray_masked = np.where(alpha_mask, rendered_gray, 0)
-                original_gray_masked = np.where(alpha_mask, original_gray, 0)
-                
-                # 투명한 부분을 제외한 그레이스케일 이미지로 SSIM 계산
-                ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
-                                data_range=255, gaussian_weights=True, 
-                                use_sample_covariance=False)
+            if ssim_mode == 'GRAY':
+                # Convert to grayscale for SSIM calculation
+                original_gray = cv2.cvtColor(image2_rgb, cv2.COLOR_BGR2GRAY) if len(image2_rgb.shape) == 3 else image2_rgb
+                rendered_gray = cv2.cvtColor(image1_rgb, cv2.COLOR_RGB2GRAY) if len(image1_rgb.shape) == 3 else image1_rgb
+                if render_array.shape[2] == 4:
+                    rendered_gray_masked = np.where(alpha_mask, rendered_gray, 0)
+                    original_gray_masked = np.where(alpha_mask, original_gray, 0)
+                    ssim_value = ssim(rendered_gray_masked, original_gray_masked, 
+                                    data_range=255, gaussian_weights=True, 
+                                    use_sample_covariance=False)
+                else:
+                    ssim_value = ssim(rendered_gray, original_gray, 
+                                    data_range=255, gaussian_weights=True, 
+                                    use_sample_covariance=False)
+            elif ssim_mode == 'COLOR':
+                ssim_value = self.ssim_color(image2_rgb, image1_rgb)
+            elif ssim_mode == 'WEIGHTED':
+                ssim_value = self.ssim_weighted(image2_rgb, image1_rgb, ssim_weights)
             else:
-                # 알파 채널이 없는 경우 전체 이미지에 대해 SSIM 계산
-                ssim_value = ssim(rendered_gray, original_gray, 
-                                data_range=255, gaussian_weights=True, 
-                                use_sample_covariance=False)
+                original_gray = cv2.cvtColor(image2_rgb, cv2.COLOR_BGR2GRAY) if len(image2_rgb.shape) == 3 else image2_rgb
+                rendered_gray = cv2.cvtColor(image1_rgb, cv2.COLOR_RGB2GRAY) if len(image1_rgb.shape) == 3 else image1_rgb
+                ssim_value = ssim(rendered_gray, original_gray, data_range=255, gaussian_weights=True, use_sample_covariance=False)
             
             self.report({'INFO'}, f"No-transparent metrics - PSNR: {psnr_value:.2f}dB, SSIM: {ssim_value:.4f}")
             
@@ -721,7 +757,7 @@ class RCMETRICS_OT_Compare(bpy.types.Operator):
             if compare_mode == 'STANDARD':
                 psnr_value, ssim_value = self.calculate_metrics_standard(render_array, original_img)
             elif compare_mode == 'NO_TRANSPARENT':
-                psnr_value, ssim_value = self.calculate_metrics_no_transparent(render_array, original_img)
+                psnr_value, ssim_value = self.calculate_metrics_no_transparent(render_array, original_img, context)
             elif compare_mode == 'EDGES_ONLY':
                 psnr_value, ssim_value = self.calculate_metrics_edges_only(
                     render_array, original_img, rc_metrics.edge_thickness)

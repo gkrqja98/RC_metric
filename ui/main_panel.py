@@ -130,6 +130,13 @@ class RCMETRICS_PT_Panel(Panel):
         # Compare mode selector
         compare_box.prop(rc_metrics, "compare_mode")
         
+        # SSIM mode selector
+        compare_box.prop(rc_metrics, "ssim_mode")
+        
+        # SSIM weights (only show if weighted mode)
+        if rc_metrics.ssim_mode == 'WEIGHTED':
+            compare_box.prop(rc_metrics, "ssim_weights")
+        
         # Edge thickness for edges-only mode
         if rc_metrics.compare_mode == 'EDGES_ONLY':
             compare_box.prop(rc_metrics, "edge_thickness")

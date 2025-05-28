@@ -181,6 +181,17 @@ class RCMETRICS_PT_Panel(Panel):
             col.label(text="SSIM > 0.9: High similarity")
             col.label(text="SSIM > 0.95: Excellent match")
 
+        # Whole Camera Analysis section
+        layout.separator()
+        layout.label(text="Whole Camera Analysis", icon='CAMERA_DATA')
+        whole_box = layout.box()
+        whole_box.prop(rc_metrics, "whole_camera_output_dir")
+        row = whole_box.row()
+        row.operator("rcmetrics.whole_camera_analysis", text="Start Whole Camera Analysis", icon='RENDER_ANIMATION')
+        # 진행상황 표시(간단 텍스트)
+        if hasattr(rc_metrics, 'whole_camera_progress') and rc_metrics.whole_camera_progress:
+            whole_box.label(text=rc_metrics.whole_camera_progress, icon='INFO')
+
 # Registration
 def register():
     bpy.utils.register_class(RCMETRICS_PT_Panel)

@@ -7,6 +7,12 @@ import os
 import numpy as np
 import tempfile
 from bpy_extras.image_utils import load_image
+import csv
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 class RCMETRICS_OT_Render(bpy.types.Operator):
     """Render the current camera view"""
@@ -907,6 +913,75 @@ class RCMETRICS_OT_RenderCompare(bpy.types.Operator):
         
         return {'FINISHED'}
 
+class RCMETRICS_OT_WholeCameraAnalysis(bpy.types.Operator):
+    """Analyze all cameras: render, measure, and save results"""
+    bl_idname = "rcmetrics.whole_camera_analysis"
+    bl_label = "Whole Camera Analysis"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        import os
+        import time
+        import cv2
+        import numpy as np
+        scene = context.scene
+        rc_metrics = scene.rc_metrics
+        output_dir = rc_metrics.whole_camera_output_dir
+        if not output_dir or not os.path.isdir(bpy.path.abspath(output_dir)):
+            self.report({'ERROR'}, "Please select a valid output directory.")
+            return {'CANCELLED'}
+        cameras = [obj for obj in scene.objects if obj.type == 'CAMERA']
+        if not cameras:
+            self.report({'ERROR'}, "No cameras found in the scene.")
+            return {'CANCELLED'}
+        results = []
+        total = len(cameras)
+        for idx, cam in enumerate(cameras):
+            scene.camera = cam
+            rc_metrics.whole_camera_progress = f"Rendering {cam.name} ({idx+1}/{total})..."
+            bpy.ops.rcmetrics.render()
+            render_img = bpy.data.images.get("RC_Current_Render")
+            if not render_img or not render_img.filepath:
+                self.report({'WARNING'}, f"No render for {cam.name}")
+                continue
+            render_path = bpy.path.abspath(render_img.filepath)
+            # Save rendered image to output dir
+            ext = os.path.splitext(render_path)[-1]
+            save_name = f"{cam.name}{ext}"
+            save_path = os.path.join(bpy.path.abspath(output_dir), save_name)
+            try:
+                import shutil
+                shutil.copy(render_path, save_path)
+            except Exception as e:
+                self.report({'WARNING'}, f"Failed to save render for {cam.name}: {e}")
+            # Run comparison
+            rc_metrics.whole_camera_progress = f"Comparing {cam.name} ({idx+1}/{total})..."
+            bpy.ops.rcmetrics.compare()
+            # Save metrics
+            results.append({
+                'Camera': cam.name,
+                'PSNR': rc_metrics.last_psnr,
+                'SSIM': rc_metrics.last_ssim
+            })
+        # Save results to CSV/Excel
+        csv_path = os.path.join(bpy.path.abspath(output_dir), "analysis_results.csv")
+        with open(csv_path, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=['Camera', 'PSNR', 'SSIM'])
+            writer.writeheader()
+            for row in results:
+                writer.writerow(row)
+        if HAS_PANDAS:
+            try:
+                import pandas as pd
+                df = pd.DataFrame(results)
+                xlsx_path = os.path.join(bpy.path.abspath(output_dir), "analysis_results.xlsx")
+                df.to_excel(xlsx_path, index=False)
+            except Exception as e:
+                self.report({'WARNING'}, f"Failed to save Excel: {e}")
+        rc_metrics.whole_camera_progress = f"Analysis complete! Saved to {csv_path}"
+        self.report({'INFO'}, f"Whole Camera analysis complete. Results saved to {csv_path}")
+        return {'FINISHED'}
+
 # Registration
 def register():
     bpy.utils.register_class(RCMETRICS_OT_Render)
@@ -915,6 +990,7 @@ def register():
     bpy.utils.register_class(RCMETRICS_OT_ViewDiff)
     bpy.utils.register_class(RCMETRICS_OT_ViewEdgeMask)
     bpy.utils.register_class(RCMETRICS_OT_RenderCompare)
+    bpy.utils.register_class(RCMETRICS_OT_WholeCameraAnalysis)
 
 def unregister():
     bpy.utils.unregister_class(RCMETRICS_OT_RenderCompare)
@@ -923,3 +999,4 @@ def unregister():
     bpy.utils.unregister_class(RCMETRICS_OT_ViewRender)
     bpy.utils.unregister_class(RCMETRICS_OT_Compare)
     bpy.utils.unregister_class(RCMETRICS_OT_Render)
+    bpy.utils.unregister_class(RCMETRICS_OT_WholeCameraAnalysis)

@@ -3,7 +3,7 @@ Properties for the RC Metrics add-on.
 """
 
 import bpy
-from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty, IntProperty, FloatVectorProperty)
+from bpy.props import (StringProperty, PointerProperty, FloatProperty, EnumProperty, BoolProperty, IntProperty, FloatVectorProperty, CollectionProperty)
 from bpy.types import PropertyGroup
 
 def get_camera_items(self, context):
@@ -169,6 +169,17 @@ class RCMetricsProperties(PropertyGroup):
         subtype='COLOR',
         step=0.01
     )
+
+    # Whole Camera 분석 결과 저장 폴더
+    whole_camera_output_dir: StringProperty(
+        name="Whole Camera Output Dir",
+        description="Directory to save all rendered images and analysis results for Whole Camera mode",
+        default="",
+        subtype='DIR_PATH'
+    )
+
+    # Whole Camera 분석 결과 임시 저장(런타임용, UI에는 노출 안 함)
+    whole_camera_results: CollectionProperty(type=bpy.types.PropertyGroup)
 
 # Registration function
 def register():
